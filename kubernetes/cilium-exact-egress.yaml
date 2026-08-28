@@ -1,0 +1,35 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gradia-guard-gateway-exact-egress
+  namespace: gradia-guard
+  annotations:
+    gradia.dev/replaces: gateway-standard-egress
+spec:
+  endpointSelector:
+    matchLabels:
+      gradia.dev/boundary-role: gateway
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
+    - toFQDNs:
+        - matchName: api.anthropic.com
+        - matchName: api.openai.com
+        - matchName: api.x.ai
+        - matchName: generativelanguage.googleapis.com
+        - matchName: api.gradiahq.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

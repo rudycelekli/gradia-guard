@@ -1,0 +1,76 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: gradia-guard-boundary
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["deployments"]
+  matchConditions:
+    - name: gradia-boundary-workload
+      expression: >-
+        has(object.spec.template.metadata.labels) &&
+        'gradia.dev/boundary-role' in object.spec.template.metadata.labels
+  validations:
+    - expression: >-
+        object.spec.template.spec.containers.all(c,
+          c.image.matches('^.+@sha256:[0-9a-f]{64}$'))
+      message: Every Guard boundary image must use an exact SHA-256 digest pin.
+    - expression: >-
+        (!has(object.spec.template.spec.hostNetwork) || object.spec.template.spec.hostNetwork == false) &&
+        (!has(object.spec.template.spec.hostPID) || object.spec.template.spec.hostPID == false) &&
+        (!has(object.spec.template.spec.hostIPC) || object.spec.template.spec.hostIPC == false) &&
+        has(object.spec.template.spec.automountServiceAccountToken) &&
+        object.spec.template.spec.automountServiceAccountToken == false
+      message: Guard boundary Pods may not share host namespaces or auto-mount API tokens.
+    - expression: >-
+        has(object.spec.template.spec.securityContext) &&
+        has(object.spec.template.spec.securityContext.runAsNonRoot) &&
+        object.spec.template.spec.securityContext.runAsNonRoot == true &&
+        has(object.spec.template.spec.securityContext.seccompProfile) &&
+        object.spec.template.spec.securityContext.seccompProfile.type == 'RuntimeDefault' &&
+        object.spec.template.spec.containers.all(c,
+          has(c.securityContext) &&
+          has(c.securityContext.allowPrivilegeEscalation) &&
+          c.securityContext.allowPrivilegeEscalation == false &&
+          (!has(c.securityContext.privileged) || c.securityContext.privileged == false) &&
+          has(c.securityContext.readOnlyRootFilesystem) &&
+          c.securityContext.readOnlyRootFilesystem == true &&
+          has(c.securityContext.capabilities) &&
+          has(c.securityContext.capabilities.drop) &&
+          c.securityContext.capabilities.drop.exists(x, x == 'ALL'))
+      message: Guard boundary Pods must remain non-root/seccomp-confined and containers non-privileged, read-only, non-escalating, and capability-free.
+    - expression: >-
+        object.spec.template.metadata.labels['gradia.dev/boundary-role'] in
+          ['agent', 'gateway', 'identity-broker'] &&
+        ((object.spec.template.metadata.labels['gradia.dev/boundary-role'] == 'agent' &&
+          object.spec.template.spec.serviceAccountName == 'gradia-guard-agent') ||
+         (object.spec.template.metadata.labels['gradia.dev/boundary-role'] == 'gateway' &&
+          object.spec.template.spec.serviceAccountName == 'gradia-guard-gateway') ||
+         (object.spec.template.metadata.labels['gradia.dev/boundary-role'] == 'identity-broker' &&
+          object.spec.template.spec.serviceAccountName == 'gradia-guard-identity-broker'))
+      message: Every Guard boundary role must use its exact dedicated ServiceAccount.
+    - expression: >-
+        object.spec.template.metadata.labels['gradia.dev/boundary-role'] == 'gateway' ||
+        object.spec.template.spec.containers.all(c,
+          !has(c.env) || c.env.all(e,
+            !(e.name in ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'XAI_API_KEY'])))
+      message: Agent and identity-broker Pods may not receive provider credentials.
+    - expression: >-
+        object.spec.template.metadata.labels['gradia.dev/boundary-role'] == 'identity-broker' ||
+        !has(object.spec.template.spec.volumes) ||
+        object.spec.template.spec.volumes.all(v,
+          !has(v.secret) || v.secret.secretName != 'gradia-guard-identity-issuer')
+      message: Only the identity-broker Pod may mount the Guard identity issuer key.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: gradia-guard-boundary
+spec:
+  policyName: gradia-guard-boundary
+  validationActions: ["Deny", "Audit"]

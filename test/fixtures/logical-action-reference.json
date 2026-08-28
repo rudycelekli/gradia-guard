@@ -1,0 +1,13 @@
+{
+  "schema_version": "gradia.logical-action-identity.v1",
+  "coordinates": {
+    "schema_version": "gradia.logical-action-coordinates.v1",
+    "action_namespace_id": "run-conditional-underwriting-001",
+    "actor_id": "underwriter-agent-01",
+    "logical_operation_id": "loan-case-042.condition-review",
+    "attempt_number": 2
+  },
+  "coordinates_sha256": "ca2b979656fc6ccaa69a2ad34520c0be8da58df54706b300bbd02edc8c955575",
+  "occurrence_id": "logical-action.ca2b979656fc6ccaa69a2ad34520c0be8da58df54706b300bbd02edc8c955575",
+  "claim_boundary": "same_declared_action_coordinates_not_semantic_equivalence_causality_or_capture_completeness"
+}

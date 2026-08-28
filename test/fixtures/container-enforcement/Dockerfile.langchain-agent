@@ -1,0 +1,13 @@
+FROM python@sha256:09f7da3bc104798d0afb40bc08d23ab2da20a76130cec1f2ef170848f5d85217
+
+WORKDIR /opt/gradia
+
+COPY pyproject.toml uv.lock ./
+
+RUN python -m pip install --no-cache-dir --disable-pip-version-check uv==0.11.7 \
+    && uv sync --frozen --no-dev --extra guard-frameworks --no-install-project \
+    && .venv/bin/python -c 'from importlib import metadata; expected={"langchain-anthropic":"1.7.0","langchain-core":"1.6.1","langchain-google-genai":"4.3.7","langchain-openai":"1.6.0","langchain-xai":"1.3.0"}; assert all(metadata.version(name)==version for name,version in expected.items())'
+
+ENV PATH="/opt/gradia/.venv/bin:${PATH}"
+
+CMD ["python", "-c", "import time; time.sleep(86400)"]

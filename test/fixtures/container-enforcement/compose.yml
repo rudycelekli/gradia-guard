@@ -1,0 +1,61 @@
+name: gradia-guard-enforcement-proof
+
+services:
+  agent:
+    image: node:22-alpine
+    container_name: gradia-guard-agent-proof
+    command:
+      - node
+      - -e
+      - setInterval(() => {}, 60_000)
+    user: "65532:65532"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    volumes:
+      - ../../../node_modules:/opt/guard/node_modules:ro
+      - ./vercel-provider-probe.mjs:/opt/guard/vercel-provider-probe.mjs:ro
+    networks:
+      - internal
+
+  gateway:
+    image: node:22-alpine
+    container_name: gradia-guard-gateway-proof
+    command:
+      - node
+      - /opt/guard/guard-gateway.mjs
+    environment:
+      GRADIA_GUARD_LOCAL_CAPABILITY: ${GRADIA_GUARD_LOCAL_CAPABILITY:?set a fresh local capability}
+      GRADIA_GUARD_RUNTIME_ID: docker-sdk-runtime-01
+      GRADIA_GUARD_PROOF_PROVIDER: ${GRADIA_GUARD_PROOF_PROVIDER:?set an exact provider}
+      ANTHROPIC_API_KEY: fixture-parent-only-provider-value
+      GEMINI_API_KEY: fixture-parent-only-provider-value
+      GOOGLE_API_KEY: fixture-parent-only-provider-value
+      OPENAI_API_KEY: fixture-parent-only-provider-value
+      XAI_API_KEY: fixture-parent-only-provider-value
+    user: "65532:65532"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    volumes:
+      - ../../../dist:/opt/guard/dist:ro
+      - ../../../node_modules:/opt/guard/node_modules:ro
+      - ./guard-gateway.mjs:/opt/guard/guard-gateway.mjs:ro
+    networks:
+      - internal
+      - egress
+
+networks:
+  internal:
+    name: gradia-guard-proof-internal
+    internal: true
+  egress:
+    name: gradia-guard-proof-egress
