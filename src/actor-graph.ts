@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { canonicalJson, digestCanonical } from "./canonical.js";
+import { canonicalJson, compareCanonicalStrings, digestCanonical } from "./canonical.js";
 import { sdkFrameBlockers } from "./sdk.js";
 import { verifySdkBundle } from "./sdk-verify.js";
 import {
@@ -158,7 +158,7 @@ export function analyzeSdkActorGraph(directory: string): SdkActorGraphReport {
   }
 
   const actors = [...actorRows.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => compareCanonicalStrings(left, right))
     .map(([actorId, row]): SdkActorGraphActor => ({
       actor_id: actorId,
       declared_principal_ids: [...row.principals].sort(),
@@ -170,7 +170,9 @@ export function analyzeSdkActorGraph(directory: string): SdkActorGraphReport {
       outbound_cross_actor_edge_count: row.outbound,
       maximum_declared_parent_depth: row.maximumDepth,
     }));
-  edges.sort((left, right) => left.child_occurrence_sha256.localeCompare(right.child_occurrence_sha256));
+  edges.sort((left, right) =>
+    compareCanonicalStrings(left.child_occurrence_sha256, right.child_occurrence_sha256),
+  );
   const body: SdkActorGraphReportBody = {
     schema_version: SDK_ACTOR_GRAPH_SCHEMA_VERSION,
     claim_boundary:

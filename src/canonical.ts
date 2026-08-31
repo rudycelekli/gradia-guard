@@ -8,6 +8,17 @@ export type CanonicalValue =
   | readonly CanonicalValue[]
   | { readonly [key: string]: CanonicalValue };
 
+/** Locale-independent UTF-16 code-unit order for evidence-bound strings. */
+export function compareCanonicalStrings(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+export function isStrictCanonicalStringOrder(values: readonly string[]): boolean {
+  return values.every(
+    (value, index) => index === 0 || compareCanonicalStrings(values[index - 1] as string, value) < 0,
+  );
+}
+
 function normalize(value: unknown, path: string): CanonicalValue {
   if (value === null || typeof value === "boolean" || typeof value === "string") return value;
   if (typeof value === "number") {
@@ -22,7 +33,7 @@ function normalize(value: unknown, path: string): CanonicalValue {
       throw new TypeError(`canonical_non_plain_object:${path}`);
     }
     const output: Record<string, CanonicalValue> = {};
-    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+    for (const key of Object.keys(value as Record<string, unknown>).sort(compareCanonicalStrings)) {
       const item = (value as Record<string, unknown>)[key];
       if (item === undefined) throw new TypeError(`canonical_undefined:${path}.${key}`);
       output[key] = normalize(item, `${path}.${key}`);

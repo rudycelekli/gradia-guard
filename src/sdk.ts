@@ -7,7 +7,13 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import { canonicalJson, digestCanonical, isSha256, sha256 } from "./canonical.js";
+import {
+  canonicalJson,
+  digestCanonical,
+  isSha256,
+  isStrictCanonicalStringOrder,
+  sha256,
+} from "./canonical.js";
 import { contentReferenceBlockers } from "./frames.js";
 import { coverageBlockers, sdkCoverage } from "./coverage.js";
 import { assertEvidenceSafe, assertStableId } from "./security.js";
@@ -1227,7 +1233,7 @@ function assertExactVersion(value: string, field: string): void {
 
 function assertSortedStableIds(values: readonly string[], field: string): void {
   if (!Array.isArray(values) || values.length === 0) throw new Error(`${field}_missing`);
-  if (!values.every((value, index) => index === 0 || (values[index - 1] as string).localeCompare(value) < 0)) {
+  if (!isStrictCanonicalStringOrder(values)) {
     throw new Error(`${field}_not_canonical`);
   }
   values.forEach((value) => assertStableId(value, field));

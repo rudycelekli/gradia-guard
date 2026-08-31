@@ -48,6 +48,10 @@ import {
   formatProviderSdkCompatibilityCatalog,
   providerSdkCompatibilityCatalog,
 } from "./provider-sdk-compatibility.js";
+import {
+  canonicalProofPackVerification,
+  verifyProofPackDirectory,
+} from "./proof-pack.js";
 import { runGuardedProcess } from "./run.js";
 import {
   evaluateModelPolicy,
@@ -83,6 +87,7 @@ async function main(argv: string[]): Promise<number> {
   if (command === "compare") return compareCommand(rest);
   if (command === "policy") return policyCommand(rest);
   if (command === "readiness") return readinessCommand(rest);
+  if (command === "proof-pack") return proofPackCommand(rest);
   if (command === "sdk-matrix") return sdkMatrixCommand(rest);
   if (command === "framework-matrix") return frameworkMatrixCommand(rest);
   if (command === "runtime") return await runtimeCommand(rest);
@@ -1032,12 +1037,26 @@ function verifyCommand(argv: string[]): number {
   return result.ok ? 0 : 1;
 }
 
+function proofPackCommand(argv: string[]): number {
+  const [subcommand, ...rest] = argv;
+  if (subcommand !== "verify") {
+    throw new Error(`proof_pack_subcommand_invalid:${subcommand ?? "missing"}`);
+  }
+  if (rest.length !== 1 || !rest[0] || rest[0].startsWith("-")) {
+    throw new Error("proof_pack_verify_directory_required");
+  }
+  const result = verifyProofPackDirectory(resolve(rest[0]));
+  process.stdout.write(canonicalProofPackVerification(result));
+  return result.ok ? 0 : 1;
+}
+
 function help(): string {
-  return `Gradia Guard 0.1.0-beta.1
+  return `Gradia Guard 0.1.0-beta.2
 
 Usage:
   gradia-guard run [--out DIR] [--spool digest-only|encrypted] [--key-env NAME --key-id ID] -- COMMAND [ARGS...]
   gradia-guard verify [--key-env NAME --key-id ID] BUNDLE_DIR
+  gradia-guard proof-pack verify PROOF_PACK_DIR
   gradia-guard inspect [--json] BUNDLE_DIR
   gradia-guard capabilities [--json]
   gradia-guard doctor [--json]
@@ -1134,6 +1153,11 @@ size and attempt limits before dispatch; it does not enforce calls that bypass i
 Readiness commands are local and account-free. They map a verified bundle's observed
 surfaces to opaque organization or licensed-framework control references. Evidence-ready
 does not mean compliant, certified, effective, or accepted by an auditor.
+
+Proof Pack verification is local and account-free. Its versioned profile
+recomputes the frame chain, exploit semantics, every published aggregate and the
+manifest self-digest. A passing result proves integrity and derivation only—not
+authorship, timestamp, data rights, runtime enforcement, or scientific validity.
 
 Runtime collect-docker asks the Docker daemon for the exact agent, gateway, and network
 posture, then launches one blocked-direct-egress probe and one allowed-gateway probe from

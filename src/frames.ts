@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { digestCanonical, isSha256 } from "./canonical.js";
+import { digestCanonical, isSha256, isStrictCanonicalStringOrder } from "./canonical.js";
 import { coverageBlockers } from "./coverage.js";
 import { assertEvidenceSafe, assertStableId } from "./security.js";
 import {
@@ -292,9 +292,7 @@ export function contentReferenceBlockers(reference: ContentReference): string[] 
 }
 
 function isSortedUnique(values: readonly string[]): boolean {
-  return values.every((value, index) =>
-    index === 0 ? true : (values[index - 1] as string).localeCompare(value) < 0,
-  );
+  return isStrictCanonicalStringOrder(values);
 }
 
 function exactKeyBlockers(value: object, expected: readonly string[], label: string): string[] {

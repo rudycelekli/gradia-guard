@@ -19,6 +19,7 @@ test("capability catalog keeps the local tier useful and the managed tier deploy
     [
       "free.process_run",
       "free.bundle_verify",
+      "free.proof_pack_verify",
       "free.bundle_inspect",
       "free.bundle_compare",
       "free.actor_graph",
@@ -41,6 +42,7 @@ test("capability catalog keeps the local tier useful and the managed tier deploy
     catalog.managed_capabilities.map((item) => item.capability_id),
     [
       "managed.authenticated_ingestion",
+      "managed.proof_pack_verify",
       "managed.remote_anchor_issuance",
       "managed.retention_declaration",
       "managed.human_review",
@@ -131,8 +133,8 @@ test("capabilities CLI emits human and canonical machine-readable boundaries wit
     encoding: "utf8",
   });
   assert.match(human, /capability catalog: VERIFIED STATIC BOUNDARIES/);
-  assert.match(human, /Free local\/account-free capabilities \(12\)/);
-  assert.match(human, /Managed deployment-specific capabilities \(8\)/);
+  assert.match(human, /Free local\/account-free capabilities \(13\)/);
+  assert.match(human, /Managed deployment-specific capabilities \(9\)/);
   assert.match(human, /payment may change service availability, never evidence coverage/);
 
   const machine = JSON.parse(

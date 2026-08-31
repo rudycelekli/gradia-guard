@@ -2,7 +2,7 @@ import { canonicalJson, digestCanonical, isSha256 } from "./canonical.js";
 
 export const CAPABILITY_CATALOG_SCHEMA_VERSION =
   "gradia.guard.capability-catalog.v2" as const;
-export const GUARD_PACKAGE_VERSION = "0.1.0-beta.1" as const;
+export const GUARD_PACKAGE_VERSION = "0.1.0-beta.2" as const;
 
 export type GuardCapabilityTier = "free_local" | "managed_service";
 
@@ -86,6 +86,12 @@ export function guardCapabilityCatalog(): GuardCapabilityCatalog {
         "verification_proves_bundle_integrity_and_declared_coverage_not_system_completeness",
       ),
       free(
+        "free.proof_pack_verify",
+        ["CLI: proof-pack verify", "verifyProofPack", "verifyProofPackDirectory"],
+        ["portable research-frame integrity", "independent recomputation of declared aggregates"],
+        "proof_pack_verification_proves_integrity_and_derivation_not_authorship_rights_or_scientific_validity",
+      ),
+      free(
         "free.bundle_inspect",
         ["CLI: inspect", "inspectBundle"],
         ["verified observed-surface inventory", "explicit assurance ceiling and next gap"],
@@ -156,6 +162,12 @@ export function guardCapabilityCatalog(): GuardCapabilityCatalog {
         ["POST /v1/projects/{project_id}/guard/evidence-editions"],
         ["authenticated evidence ingestion", "server re-verification and immutable edition digest"],
         "ingestion_refuses_unverified_or_conflicting_bundles_and_does_not_expand_source_coverage",
+      ),
+      managed(
+        "managed.proof_pack_verify",
+        ["POST /v1/proof-packs/verify"],
+        ["authenticated hosted profile verification", "structured blockers without artifact storage"],
+        "hosted_verification_issues_no_anchor_rights_decision_retention_claim_or_scientific_judgment",
       ),
       managed(
         "managed.remote_anchor_issuance",

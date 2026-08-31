@@ -113,6 +113,12 @@ function requestBody(): Uint8Array {
   return Buffer.from(JSON.stringify({ model, input: "secret customer case" }));
 }
 
+function responseWithUrl(body: BodyInit, init: ResponseInit = {}, url = targetUrl): Response {
+  const response = new Response(body, init);
+  Object.defineProperty(response, "url", { value: url });
+  return response;
+}
+
 function bundleDirectory(label = "gradia-http-egress-"): string {
   return join(mkdtempSync(join(tmpdir(), label)), "bundle");
 }
@@ -370,7 +376,7 @@ test("no-redirect fetch transport uses closure credentials without capturing the
       const headers = new Headers(init?.headers);
       observedAuthorization = headers.get("authorization") ?? "";
       observedRedirect = String(init?.redirect);
-      return new Response(Buffer.from(responseBody()), {
+      return responseWithUrl(Buffer.from(responseBody()), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
@@ -399,7 +405,7 @@ test("credential closure accepts only the provider authentication header", async
       credentialHeaders: () => ({ [credentialHeader]: "credential-value" }),
       fetchImpl: async (_input, init) => {
         observedHeaders = new Headers(init?.headers);
-        return new Response(Buffer.from(responseBody()), {
+        return responseWithUrl(Buffer.from(responseBody()), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
@@ -418,6 +424,27 @@ test("credential closure accepts only the provider authentication header", async
     assert.equal((observedHeaders as Headers | null)?.get(credentialHeader), "credential-value");
     assert.equal((observedHeaders as Headers | null)?.get("content-type"), "application/json");
   }
+});
+
+test("no-redirect fetch transport refuses an indeterminate final URL", async () => {
+  const transport = createNoRedirectFetchTransport({
+    credentialHeaders: () => ({ authorization: "Bearer provider-key" }),
+    fetchImpl: async () => new Response(Buffer.from(responseBody()), { status: 200 }),
+  });
+  await assert.rejects(
+    () =>
+      transport({
+        provider: "openai",
+        targetUrl,
+        method: "POST",
+        requestBody: requestBody(),
+        requestMediaType: "application/json",
+        requestedModel: model,
+        timeoutMs: 5_000,
+        maxResponseBytes: 100_000,
+      }),
+    /guard_http_transport_final_url_missing/,
+  );
 });
 
 test("credential closure cannot smuggle routing, request, or ambiguous authentication headers", async () => {

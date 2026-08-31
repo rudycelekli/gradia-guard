@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { canonicalJson, digestCanonical, isSha256 } from "./canonical.js";
+import { canonicalJson, compareCanonicalStrings, digestCanonical, isSha256 } from "./canonical.js";
 import { assertModelPin, type GatewayPolicyDecisionInput } from "./gateway.js";
 import type { SdkPolicyDecisionInput } from "./sdk.js";
 import { assertStableId } from "./security.js";
@@ -133,7 +133,7 @@ export function evaluateModelPolicy(
     return {
       decision: "blocked",
       censorKind: "policy",
-      reasonCodes: reasons.sort(),
+      reasonCodes: reasons.sort(compareCanonicalStrings),
       policySha256: policy.policy_sha256,
     };
   }
@@ -175,7 +175,7 @@ export function evaluateToolPolicy(
     return {
       decision: "blocked",
       censorKind: reasons.includes("authority_scope_not_allowed") ? "authority" : "policy",
-      reasonCodes: reasons.sort(),
+      reasonCodes: reasons.sort(compareCanonicalStrings),
       policySha256: policy.policy_sha256,
     };
   }
@@ -295,7 +295,7 @@ function validateToolIdentity(identity: SdkToolIdentity): void {
 function normalizedScopes(scopes: readonly string[]): readonly string[] {
   if (!Array.isArray(scopes) || scopes.length === 0) throw new Error("guard_policy_scopes_missing");
   for (const scope of scopes) assertStableId(scope, "guard_policy_scope_id");
-  const normalized = [...new Set(scopes)].sort();
+  const normalized = [...new Set(scopes)].sort(compareCanonicalStrings);
   if (normalized.length !== scopes.length || normalized.some((scope, index) => scope !== scopes[index])) {
     throw new Error("guard_policy_scopes_not_canonical");
   }

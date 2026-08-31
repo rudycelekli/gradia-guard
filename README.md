@@ -1,5 +1,8 @@
 # `@gradia/guard`
 
+[![Guard CI](https://github.com/rudycelekli/gradia-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/rudycelekli/gradia-guard/actions/workflows/ci.yml)
+[![Proof Pack](https://github.com/rudycelekli/gradia-guard/actions/workflows/proof-pack.yml/badge.svg)](https://github.com/rudycelekli/gradia-guard/actions/workflows/proof-pack.yml)
+
 > Apache-2.0 public beta. The local SDK and verifier are useful without an
 > account; managed availability never upgrades evidence coverage or claim
 > truth. A wrapper or voluntary SDK remains bypassable unless a separately
@@ -7,9 +10,17 @@
 
 Gradia Guard is a zero-runtime-dependency evidence recorder and verifier for AI-system execution.
 
+Python applications can use the source-complete beta in
+`packages/guard-python`. It emits this package's exact
+`gradia.guard.sdk-bundle.v1` ABI: either language's independent verifier can
+replay either language's bundle. The Python candidate is not published to
+PyPI, and its tested automatic framework cell is limited to
+`langchain-core==1.6.1`; those boundaries are not implied away by ABI parity.
+
 ```bash
 npx @gradia/guard run -- node agent.js
 npx @gradia/guard verify .gradia/evidence/node-<session-id>
+npx @gradia/guard proof-pack verify path/to/proof-pack
 npx @gradia/guard inspect .gradia/evidence/node-<session-id>
 npx @gradia/guard doctor
 npx @gradia/guard capabilities --json
@@ -21,7 +32,7 @@ npx @gradia/guard compare .gradia/evidence/before .gradia/evidence/after
 ```
 
 Before the npm beta is published, the exact tagged public source release can be
-installed with `npm install github:rudycelekli/gradia-guard#v0.1.0-beta.1`.
+installed with `npm install github:rudycelekli/gradia-guard#v0.1.0-beta.2`.
 Registry publication is a separate signed release event and is never inferred
 from this README.
 
@@ -49,8 +60,35 @@ and digest-identity changes locally. It deliberately does not call those
 differences a behavioral regression: pass, drift, and regression require a
 separately admitted frozen evaluation contract in managed Gradia.
 
+`proof-pack verify` is also local, account-free, and telemetry-free. Its first
+versioned profile independently replays the Reward-Hacking Wind Tunnel's
+`frames.ndjson` and `manifest.json`: frame chain, exploit semantics,
+attempt/exploit/cost totals, every density slice, magnitude histogram, and
+manifest self-digest. A green result proves those bytes are internally intact
+and the declared aggregates derive from them. It does not prove who authored or
+timestamped them, that their data may be used, that the runtime was enforced,
+or that the study is scientifically valid. The authenticated managed
+`POST /v1/proof-packs/verify` route returns the same bounded verification and
+stores nothing.
+
+The repository also publishes a reusable account-free action pinned to the
+same verifier source:
+
+```yaml
+- uses: actions/checkout@v6
+- uses: rudycelekli/gradia-guard@v0.1.0-beta.2
+  id: proof
+  with:
+    proof-pack: path/to/proof-pack
+```
+
+The action fails the job on any blocker and exposes only `ok`,
+`manifest-sha256`, and `frames-chain-head`. Its job summary repeats the narrow
+claim boundary; a green badge is not a certificate, rights decision, trusted
+timestamp, runtime-enforcement claim, or scientific-validity judgment.
+
 `capabilities` is an account-free, canonical product-boundary catalog. It keeps
-local run, verify, inspect, compare, actor-graph, evidence-readiness, policy,
+local run, bundle/Proof-Pack verify, inspect, compare, actor-graph, evidence-readiness, policy,
 explicit-adapter, and portable-anchor verification useful without a managed
 account. It separately lists repository-implemented managed surfaces whose
 availability remains deployment- and authorization-specific: authenticated
@@ -921,6 +959,63 @@ G2 records exact digest-only input/output or request/result references, typed re
 The SDK accepts no headers, credential field, arbitrary metadata, rationale, scratchpad, or chain-of-thought field. Raw bodies pass through memory only long enough to compute length and SHA-256; they are never written by G2. A supplied state root proves only the identity the application declared—it is not a runtime-observed filesystem, database, or world root.
 
 Every G2 manifest states `capture_boundary: "explicit_sdk"`, `bypass_possible: true`, and `uninstrumented_or_direct_io_is_not_observed`. Direct model, tool, network, subprocess, or filesystem activity outside these explicit methods remains invisible. Removing or strengthening that disclosure fails offline verification.
+
+## Route expensive evidence work before dispatch
+
+Guard ships the same pure GU6 policy evaluator used by the managed service.
+It performs no network call and spends nothing. Integer basis points and
+micro-USD keep the decision canonical across Python and TypeScript:
+
+```ts
+import {
+  GOVERNANCE_ROUTING_CLAIM_BOUNDARY,
+  GOVERNANCE_ROUTING_POLICY_SCHEMA_VERSION,
+  GOVERNANCE_ROUTING_REQUEST_SCHEMA_VERSION,
+  evaluateGovernanceRoute,
+  sealGovernanceRoutingPolicy,
+  sealGovernanceRoutingRequest,
+} from "@gradia/guard";
+
+const policy = sealGovernanceRoutingPolicy({
+  schema_version: GOVERNANCE_ROUTING_POLICY_SCHEMA_VERSION,
+  policy_id: "frontier-panel",
+  policy_version: "v1",
+  min_task_value_bps: 6000,
+  min_evaluator_reliability_bps: 8000,
+  max_diagnostic_budget_microusd: 20_000_000,
+  max_panel_budget_microusd: 500_000_000,
+  max_cost_per_accepted_result_microusd: 100_000_000,
+  min_diagnostic_attempts_for_panel: 5,
+  min_accepted_results_for_panel: 1,
+  require_independent_human_panel_approval: true,
+  claim_boundary: GOVERNANCE_ROUTING_CLAIM_BOUNDARY,
+});
+
+const request = sealGovernanceRoutingRequest({
+  schema_version: GOVERNANCE_ROUTING_REQUEST_SCHEMA_VERSION,
+  request_id: "diagnostic-001",
+  study_key: "release-2026-08",
+  requested_stage: "diagnostic",
+  task_value_bps: 8500,
+  evaluator_reliability_bps: 9000,
+  cumulative_spend_microusd: 0,
+  requested_incremental_budget_microusd: 20_000_000,
+  attempted_results: 0,
+  accepted_results: 0,
+  result_set_sha256: null,
+  panel_definition_sha256: "0".repeat(64),
+  independent_human_approval_sha256: null,
+});
+
+const receipt = evaluateGovernanceRoute(policy, request);
+if (!receipt.dispatch_eligible) throw new Error(receipt.blockers.join(","));
+// A separate authenticated dispatcher may now decide whether to act.
+```
+
+Panel requests additionally require observed-result and independent-human-
+approval digests. The local receipt proves deterministic policy application,
+not that the approval is authentic. The managed API verifies that authority,
+freezes one denominator per policy/study/stage, and still does not dispatch.
 
 ## Spool posture
 
