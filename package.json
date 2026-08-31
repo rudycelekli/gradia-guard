@@ -76,9 +76,9 @@
     "@ai-sdk/openai": "4.0.50",
     "@ai-sdk/xai": "4.0.48",
     "@google/genai": "2.19.0",
-    "@types/node": "^22.15.0",
+    "@types/node": "^26.4.0",
     "ai": "7.0.83",
     "openai": "7.8.0",
-    "typescript": "^5.9.3"
+    "typescript": "^7.0.2"
   }
 }
