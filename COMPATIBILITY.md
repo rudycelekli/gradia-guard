@@ -29,6 +29,21 @@ npx @gradia/guard framework-matrix --json
 Those catalogs describe the pinned cells exercised by this release, not every
 version or live-provider deployment.
 
+The `gradia-wind-tunnel-evidence-manifest.v1` Proof Pack profile is a research
+artifact profile, not a Guard execution-bundle tier. Guard verifies its
+`gradia-wind-tunnel-frames.v1` chain and declared aggregates independently and
+refuses unknown profiles. Adding another research profile requires a new
+versioned schema and conformance fixture; it cannot silently reinterpret v1.
+
+## Python ABI parity
+
+The source-complete `packages/guard-python` beta emits the same
+`gradia.guard.sdk-bundle.v1` bytes and ships an independent dependency-free
+verifier. Cross-language tests require the Node verifier to accept a Python
+bundle and the Python verifier to accept a Node bundle. This is evidence-format
+parity, not framework, transport, enforcement, registry, or support parity.
+The Python package is not yet published to PyPI.
+
 ## Beta change rule
 
 Before `1.0.0`, TypeScript types and beta APIs may change. Any breaking change

@@ -131,6 +131,27 @@ test("policy loading refuses edits, unknown fields, and noncanonical scopes", ()
   assert.throws(() => sealPolicy(badScopes), /guard_policy_scopes_not_canonical/);
 });
 
+test("mixed-case scopes use one locale-independent order across producer and verifier", () => {
+  const body = policyBody();
+  body.model_routes[0]!.authority_scope_ids = ["A", "Z", "a", "b"];
+  const policy = sealPolicy(body);
+  assert.doesNotThrow(() => verifyPolicy(policy));
+  assert.equal(
+    evaluateModelPolicy(policy, {
+      provider: "openai",
+      requestedModel: "gpt-5.6-2026-08-01",
+      requestByteLength: 1,
+      attemptNumber: 1,
+      authorityScopeIds: ["A", "a"],
+    }).decision,
+    "allowed",
+  );
+
+  const localeShaped = policyBody();
+  localeShaped.model_routes[0]!.authority_scope_ids = ["a", "A", "b", "Z"];
+  assert.throws(() => sealPolicy(localeShaped), /guard_policy_scopes_not_canonical/);
+});
+
 test("policy routes refuse duplicates and wildcard-shaped ambiguity", () => {
   const duplicate = policyBody();
   duplicate.model_routes = [...duplicate.model_routes, duplicate.model_routes[0]!];

@@ -11,7 +11,7 @@ const metadata = JSON.parse(readFileSync(resolve(packageRoot, "package.json"), "
 if (metadata.private !== false) refuse("release_audit_package_private");
 if (metadata.license !== "Apache-2.0") refuse("release_audit_license_mismatch");
 if (metadata.name !== "@gradia/guard") refuse("release_audit_package_name_mismatch");
-if (metadata.version !== "0.1.0-beta.1") refuse("release_audit_version_mismatch");
+if (metadata.version !== "0.1.0-beta.2") refuse("release_audit_version_mismatch");
 if (metadata.publishConfig?.access !== "public" || metadata.publishConfig?.provenance !== true) {
   refuse("release_audit_publish_config_invalid");
 }
@@ -27,6 +27,19 @@ try {
 if (!/^[0-9a-f]{40}$/.test(gitSha)) refuse("release_audit_git_sha_invalid");
 
 const packagePath = relative(gitRoot, packageRoot) || ".";
+for (const sourceContract of [
+  "action.yml",
+  ".github/workflows/proof-pack.yml",
+  "scripts/proof-pack-action.mjs",
+  "test/fixtures/proof-pack-reference/manifest.json",
+  "test/fixtures/proof-pack-reference/frames.ndjson",
+]) {
+  try {
+    readFileSync(resolve(packageRoot, sourceContract));
+  } catch {
+    refuse(`release_audit_source_contract_missing:${sourceContract}`);
+  }
+}
 let packageStatus;
 try {
   packageStatus = execFileSync(

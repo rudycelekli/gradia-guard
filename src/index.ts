@@ -172,6 +172,16 @@ export {
 } from "./remote-anchor.js";
 export { canonicalVerificationResult, verifyBundle, type VerifyOptions } from "./verify.js";
 export {
+  canonicalProofPackVerification,
+  PROOF_PACK_VERIFICATION_SCHEMA_VERSION,
+  verifyProofPack,
+  verifyProofPackDirectory,
+  WIND_TUNNEL_FRAMES_SCHEMA_VERSION,
+  WIND_TUNNEL_MANIFEST_SCHEMA_VERSION,
+  type ProofPackInput,
+  type ProofPackVerification,
+} from "./proof-pack.js";
+export {
   assessEvidenceReadiness,
   canonicalEvidenceReadiness,
   formatEvidenceReadiness,
@@ -189,6 +199,25 @@ export {
   type EvidenceRequirement,
   type EvidenceRequirementAssessment,
 } from "./evidence-readiness.js";
+export {
+  evaluateGovernanceRoute,
+  GOVERNANCE_ROUTING_CLAIM_BOUNDARY,
+  GOVERNANCE_ROUTING_DECISION_SCHEMA_VERSION,
+  GOVERNANCE_ROUTING_POLICY_SCHEMA_VERSION,
+  GOVERNANCE_ROUTING_REQUEST_SCHEMA_VERSION,
+  sealGovernanceRoutingPolicy,
+  sealGovernanceRoutingRequest,
+  verifyGovernanceRoutingPolicy,
+  verifyGovernanceRoutingRequest,
+  type GovernanceRoutingDecision,
+  type GovernanceRoutingDecisionBody,
+  type GovernanceRoutingDisposition,
+  type GovernanceRoutingPolicy,
+  type GovernanceRoutingPolicyBody,
+  type GovernanceRoutingRequest,
+  type GovernanceRoutingRequestBody,
+  type GovernanceRoutingStage,
+} from "./governance-router.js";
 export { verifyGatewayBundle } from "./gateway-verify.js";
 export {
   AuthenticatedProviderGateway,

@@ -1,5 +1,10 @@
 import { readFileSync } from "node:fs";
-import { canonicalJson, digestCanonical, isSha256 } from "./canonical.js";
+import {
+  canonicalJson,
+  digestCanonical,
+  isSha256,
+  isStrictCanonicalStringOrder,
+} from "./canonical.js";
 import { inspectBundle, type GuardInspection } from "./inspect.js";
 import { assertStableId } from "./security.js";
 
@@ -401,9 +406,7 @@ function assertDisplayText(value: unknown, field: string, maxLength: number): as
 }
 
 function isSortedUnique(values: readonly string[]): boolean {
-  return values.every((value, index) =>
-    index === 0 ? true : (values[index - 1] as string).localeCompare(value) < 0,
-  );
+  return isStrictCanonicalStringOrder(values);
 }
 
 function requireObject(value: unknown, label: string): Record<string, unknown> {

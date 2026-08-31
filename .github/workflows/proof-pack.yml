@@ -1,0 +1,20 @@
+name: Proof Pack
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reference-profile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify the checked-in cross-runtime reference
+        uses: ./
+        with:
+          proof-pack: test/fixtures/proof-pack-reference

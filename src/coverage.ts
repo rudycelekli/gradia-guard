@@ -1,3 +1,4 @@
+import { isStrictCanonicalStringOrder } from "./canonical.js";
 import type { CaptureTier, CoverageAttestation } from "./types.js";
 
 const REQUIRED_SURFACES: Readonly<Record<CaptureTier, readonly string[]>> = {
@@ -119,7 +120,5 @@ export function coverageBlockers(value: CoverageAttestation): string[] {
 }
 
 function isSortedUnique(values: readonly string[]): boolean {
-  return values.every((value, index) =>
-    index === 0 ? true : (values[index - 1] as string).localeCompare(value) < 0,
-  );
+  return isStrictCanonicalStringOrder(values);
 }

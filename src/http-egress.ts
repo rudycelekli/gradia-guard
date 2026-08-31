@@ -468,12 +468,13 @@ export function createNoRedirectFetchTransport(
         redirect: "manual",
         signal: controller.signal,
       });
+      if (!response.url) throw new Error("guard_http_transport_final_url_missing");
       const responseBody = await readLimitedBody(response, input.maxResponseBytes);
       return {
         responseBody,
         responseMediaType: response.headers.get("content-type") ?? "application/octet-stream",
         httpStatus: response.status,
-        finalUrl: response.url || input.targetUrl,
+        finalUrl: response.url,
         redirected: response.redirected,
       };
     } finally {

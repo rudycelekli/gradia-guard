@@ -7,7 +7,13 @@ import {
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { basename, isAbsolute, join } from "node:path";
-import { canonicalJson, digestCanonical, isSha256, sha256 } from "./canonical.js";
+import {
+  canonicalJson,
+  compareCanonicalStrings,
+  digestCanonical,
+  isSha256,
+  sha256,
+} from "./canonical.js";
 import {
   LocalHttpEgressDispatcher,
   type GuardHttpEgressConfiguration,
@@ -294,7 +300,7 @@ export async function runProviderCredentiallessChild(
   const environmentSha256 = digestCanonical({
     entries: Object.entries(environment)
       .map(([name, value]) => ({ name, value_sha256: sha256(Buffer.from(value)) }))
-      .sort((left, right) => left.name.localeCompare(right.name)),
+      .sort((left, right) => compareCanonicalStrings(left.name, right.name)),
   });
   let processDirectory: string | null = null;
   let childExitCode = 125;
@@ -477,7 +483,7 @@ export function verifyCredentiallessRuntime(directory: string): CredentiallessRu
           : name.endsWith("BASE_URL")
             ? sha256(Buffer.from(providerBaseUrlValue(name, receipt.local_origin)))
             : receipt.local_capability_sha256,
-    })).sort((left, right) => left.name.localeCompare(right.name)),
+    })).sort((left, right) => compareCanonicalStrings(left.name, right.name)),
   });
   if (receipt.environment_sha256 !== expectedEnvironmentSha256) {
     blockers.push("credentialless_runtime_environment_composition_mismatch");

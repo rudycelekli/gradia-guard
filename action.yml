@@ -1,0 +1,43 @@
+name: Verify Gradia Proof Pack
+description: Independently verify a versioned Proof Pack without a Gradia account or network call.
+author: Gradia
+
+branding:
+  icon: shield
+  color: orange
+
+inputs:
+  proof-pack:
+    description: Path to the directory containing manifest.json and frames.ndjson.
+    required: true
+
+outputs:
+  ok:
+    description: Whether every profile, chain, semantic, aggregate, and digest check passed.
+    value: ${{ steps.verify.outputs.ok }}
+  manifest-sha256:
+    description: The verified manifest digest, when one was structurally available.
+    value: ${{ steps.verify.outputs.manifest_sha256 }}
+  frames-chain-head:
+    description: The independently recomputed frame-chain head.
+    value: ${{ steps.verify.outputs.frames_chain_head }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up pinned Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: "24"
+    - name: Install the verifier from this immutable action revision
+      shell: bash
+      run: npm ci --ignore-scripts --prefix "$GITHUB_ACTION_PATH"
+    - name: Build the verifier from this immutable action revision
+      shell: bash
+      run: npm run build --prefix "$GITHUB_ACTION_PATH"
+    - name: Verify Proof Pack
+      id: verify
+      shell: bash
+      env:
+        GRADIA_PROOF_PACK_INPUT: ${{ inputs.proof-pack }}
+      run: node "$GITHUB_ACTION_PATH/scripts/proof-pack-action.mjs" "$GRADIA_PROOF_PACK_INPUT"

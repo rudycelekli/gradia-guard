@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
-import { digestCanonical, sha256 } from "./canonical.js";
+import { compareCanonicalStrings, digestCanonical, sha256 } from "./canonical.js";
 import { processCoverage } from "./coverage.js";
 import { FrameChain } from "./frames.js";
 import { assertCommandSafe } from "./security.js";
@@ -266,7 +266,7 @@ function explicitEnvironmentIdentity(environment: Readonly<Record<string, string
       }
       return { name, value_sha256: sha256(Buffer.from(value)) };
     })
-    .sort((left, right) => left.name.localeCompare(right.name));
+    .sort((left, right) => compareCanonicalStrings(left.name, right.name));
   return digestCanonical({ entries });
 }
 
