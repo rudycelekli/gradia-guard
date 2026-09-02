@@ -32,7 +32,7 @@ npx @gradia/guard compare .gradia/evidence/before .gradia/evidence/after
 ```
 
 Before the npm beta is published, the exact tagged public source release can be
-installed with `npm install github:rudycelekli/gradia-guard#v0.1.0-beta.2`.
+installed with `npm install github:rudycelekli/gradia-guard#v0.1.0-beta.3`.
 Registry publication is a separate signed release event and is never inferred
 from this README.
 
@@ -76,7 +76,7 @@ same verifier source:
 
 ```yaml
 - uses: actions/checkout@v6
-- uses: rudycelekli/gradia-guard@v0.1.0-beta.2
+- uses: rudycelekli/gradia-guard@v0.1.0-beta.3
   id: proof
   with:
     proof-pack: path/to/proof-pack
