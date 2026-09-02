@@ -8,12 +8,21 @@ import {
   type GuardMcpInvocationResponse,
   type GuardMcpToolInvoker,
 } from "./mcp-adapter.js";
+import {
+  McpHttpAccessRecorder,
+  mcpHttpRequestEvidence,
+  mcpHttpRouteTargetSha256,
+  type McpHttpAccessOutcome,
+  type McpHttpAccessReasonCode,
+  type McpHttpRequestKind,
+} from "./mcp-http-evidence.js";
 import { verifyPolicy, type GuardPolicy } from "./policy.js";
 import { assertStableId } from "./security.js";
 import type { SdkToolIdentity } from "./types.js";
-import type {
-  GuardWorkloadIdentity,
-  WorkloadIdentityExpectation,
+import {
+  verifyWorkloadIdentity,
+  type GuardWorkloadIdentity,
+  type WorkloadIdentityExpectation,
 } from "./workload-identity.js";
 
 export const MCP_HTTP_PROXY_CONFIGURATION_SCHEMA_VERSION =
@@ -58,7 +67,10 @@ export interface AuthenticatedMcpHttpProxyOptions {
 }
 
 export interface AuthenticatedMcpHttpProxyCloseResult {
-  sdk_bundle_directory: string;
+  sdk_bundle_directory: string | null;
+  http_access_bundle_directory: string;
+  http_access_receipt_count: number;
+  http_access_chain_head_sha256: string;
   accepted_tool_requests: number;
   blocked_tool_requests: number;
   unauthorized_http_requests: number;
@@ -84,8 +96,12 @@ export class AuthenticatedMcpHttpProxy {
   readonly protocolVersion = MCP_HTTP_PROXY_PROTOCOL_VERSION;
   readonly configuration: GuardMcpHttpProxyConfiguration;
   private readonly server: Server;
-  private readonly adapter: AuthenticatedMcpToolAdapter;
+  private readonly adapterRef: {
+    current: AuthenticatedMcpToolAdapter | null;
+  };
+  private readonly accessRecorder: McpHttpAccessRecorder;
   private readonly evidenceDirectory: string;
+  private readonly accessEvidenceDirectory: string;
   private readonly localCapability: string;
   private readonly counters: ProxyCounters;
   private closed = false;
@@ -93,16 +109,20 @@ export class AuthenticatedMcpHttpProxy {
   constructor(input: {
     origin: string;
     server: Server;
-    adapter: AuthenticatedMcpToolAdapter;
+    adapterRef: { current: AuthenticatedMcpToolAdapter | null };
+    accessRecorder: McpHttpAccessRecorder;
     evidenceDirectory: string;
+    accessEvidenceDirectory: string;
     localCapability: string;
     configuration: GuardMcpHttpProxyConfiguration;
     counters: ProxyCounters;
   }) {
     this.origin = input.origin;
     this.server = input.server;
-    this.adapter = input.adapter;
+    this.adapterRef = input.adapterRef;
+    this.accessRecorder = input.accessRecorder;
     this.evidenceDirectory = input.evidenceDirectory;
+    this.accessEvidenceDirectory = input.accessEvidenceDirectory;
     this.localCapability = input.localCapability;
     this.configuration = input.configuration;
     this.counters = input.counters;
@@ -128,9 +148,14 @@ export class AuthenticatedMcpHttpProxy {
     if (this.closed) throw new Error("guard_mcp_http_proxy_already_closed");
     this.closed = true;
     await closeServer(this.server);
-    this.adapter.finalize();
+    this.adapterRef.current?.finalize();
+    const accessBundle = this.accessRecorder.finalize();
     return {
-      sdk_bundle_directory: this.evidenceDirectory,
+      sdk_bundle_directory:
+        this.adapterRef.current === null ? null : this.evidenceDirectory,
+      http_access_bundle_directory: this.accessEvidenceDirectory,
+      http_access_receipt_count: accessBundle.finalization.receipt_count,
+      http_access_chain_head_sha256: accessBundle.finalization.chain_head_sha256,
       accepted_tool_requests: this.counters.acceptedTool,
       blocked_tool_requests: this.counters.blockedTool,
       unauthorized_http_requests: this.counters.unauthorized,
@@ -193,24 +218,54 @@ export async function startAuthenticatedMcpHttpProxy(
     throw new Error("guard_mcp_http_expected_configuration_mismatch");
   }
   verifyRoutesAgainstPolicy(options.configuration, options.policy);
-  const evidenceDirectory = join(options.directory, "mcp-evidence");
-  const adapter = new AuthenticatedMcpToolAdapter({
-    directory: evidenceDirectory,
-    policy: options.policy,
-    workloadIdentity: options.workloadIdentity,
+  const currentUnix = options.nowUnix?.() ?? Math.floor(Date.now() / 1000);
+  const verifiedWorkloadIdentity = verifyWorkloadIdentity(options.workloadIdentity, {
     trustedPublicKeys: options.trustedPublicKeys,
-    workloadExpectation: options.workloadExpectation,
-    maxIdentityLifetimeSeconds: options.maxIdentityLifetimeSeconds,
-    ...(options.clockSkewSeconds === undefined
-      ? {}
-      : { clockSkewSeconds: options.clockSkewSeconds }),
-    ...(options.nowUnix === undefined ? {} : { nowUnix: options.nowUnix }),
-    invokeTool: async (input) => {
-      const response = await options.invokeTool(input);
-      validateNativeToolResult(response);
-      return response;
+    expectation: {
+      ...options.workloadExpectation,
+      requiredAuthorityScopeIds: options.workloadIdentity.claims.authority_scope_ids,
     },
+    nowUnix: currentUnix,
+    maxLifetimeSeconds: options.maxIdentityLifetimeSeconds,
+    clockSkewSeconds: options.clockSkewSeconds ?? 0,
   });
+  const wallTime = (): string =>
+    new Date(
+      (options.nowUnix?.() ?? Math.floor(Date.now() / 1000)) * 1000,
+    ).toISOString();
+  const evidenceDirectory = join(options.directory, "mcp-evidence");
+  const accessEvidenceDirectory = join(options.directory, "mcp-http-access");
+  const accessRecorder = new McpHttpAccessRecorder({
+    directory: accessEvidenceDirectory,
+    createdAt: wallTime(),
+    configurationSha256: options.configuration.configuration_sha256,
+    policySha256: options.policy.policy_sha256,
+    workloadIdentitySha256: verifiedWorkloadIdentity.identitySha256,
+    now: wallTime,
+  });
+  const adapterRef: { current: AuthenticatedMcpToolAdapter | null } = {
+    current: null,
+  };
+  const adapterForRequest = (): AuthenticatedMcpToolAdapter => {
+    adapterRef.current ??= new AuthenticatedMcpToolAdapter({
+      directory: evidenceDirectory,
+      policy: options.policy,
+      workloadIdentity: options.workloadIdentity,
+      trustedPublicKeys: options.trustedPublicKeys,
+      workloadExpectation: options.workloadExpectation,
+      maxIdentityLifetimeSeconds: options.maxIdentityLifetimeSeconds,
+      ...(options.clockSkewSeconds === undefined
+        ? {}
+        : { clockSkewSeconds: options.clockSkewSeconds }),
+      ...(options.nowUnix === undefined ? {} : { nowUnix: options.nowUnix }),
+      invokeTool: async (input) => {
+        const response = await options.invokeTool(input);
+        validateNativeToolResult(response);
+        return response;
+      },
+    });
+    return adapterRef.current;
+  };
   const localCapability = randomBytes(32).toString("base64url");
   const counters: ProxyCounters = {
     acceptedTool: 0,
@@ -219,17 +274,20 @@ export async function startAuthenticatedMcpHttpProxy(
     malformed: 0,
   };
   const server = createMcpServer(
-    adapter,
+    adapterForRequest,
     options.configuration,
     localCapability,
     counters,
+    accessRecorder,
   );
   const port = await listenLoopback(server);
   return new AuthenticatedMcpHttpProxy({
     origin: `http://127.0.0.1:${port}`,
     server,
-    adapter,
+    adapterRef,
+    accessRecorder,
     evidenceDirectory,
+    accessEvidenceDirectory,
     localCapability,
     configuration: options.configuration,
     counters,
@@ -237,20 +295,61 @@ export async function startAuthenticatedMcpHttpProxy(
 }
 
 function createMcpServer(
-  adapter: AuthenticatedMcpToolAdapter,
+  adapterForRequest: () => AuthenticatedMcpToolAdapter,
   configuration: GuardMcpHttpProxyConfiguration,
   localCapability: string,
   counters: ProxyCounters,
+  accessRecorder: McpHttpAccessRecorder,
 ): Server {
   return createServer(async (request, response) => {
+    const requestId = `mcp-http-request-${randomBytes(16).toString("hex")}`;
+    let requestBody: Uint8Array | null = null;
+    let requestKind: McpHttpRequestKind = "unknown";
+    let routeTargetSha256: string | null = null;
+    let adapterStarted = false;
+    let adapterResult: AuthenticatedMcpToolResult | null = null;
+    const persist = (outcome: McpHttpAccessOutcome): boolean => {
+      try {
+        accessRecorder.append({
+          requestId,
+          request: mcpHttpRequestEvidence({
+            method: request.method,
+            target: request.url,
+            rawHeaders: request.rawHeaders,
+            body: requestBody,
+          }),
+          outcome,
+        });
+        return true;
+      } catch {
+        response.destroy();
+        return false;
+      }
+    };
     response.setHeader("cache-control", "no-store");
     response.setHeader("connection", "close");
     if (request.headers.origin !== undefined) {
+      if (!persist(accessOutcome({
+        requestKind,
+        disposition: "refused",
+        reasonCode: "origin_not_allowed",
+        status: 403,
+        routeTargetSha256,
+        upstreamInvoked: false,
+      }))) return;
       counters.unauthorized += 1;
       sendJsonRpcError(response, 403, null, -32003, "origin_not_allowed");
       return;
     }
     if (!matchesBearer(request.headers.authorization, localCapability)) {
+      if (!persist(accessOutcome({
+        requestKind,
+        disposition: "refused",
+        reasonCode: "authorization_refused",
+        status: 401,
+        routeTargetSha256,
+        upstreamInvoked: false,
+      }))) return;
       counters.unauthorized += 1;
       sendJsonRpcError(response, 401, null, -32003, "authorization_refused");
       return;
@@ -264,11 +363,27 @@ function createMcpServer(
         throw new Error("guard_mcp_http_request_invalid");
       }
       const serverId = configuredServerId(request.url, configuration);
-      const body = parseJsonRpcRequest(await readIncomingRequest(request));
+      requestBody = await readIncomingRequest(request);
+      const body = parseJsonRpcRequest(requestBody);
+      requestKind = requestKindFor(body.method);
+      routeTargetSha256 = mcpHttpRouteTargetSha256(
+        serverId,
+        body.method === "tools/call" && typeof body.params["name"] === "string"
+          ? body.params["name"]
+          : null,
+      );
       verifyModernMcpHeaders(request, body);
       verifyModernRequestEnvelope(body.params);
       if (body.method === "server/discover") {
         assertExactKeys(body.params, ["_meta"], "guard_mcp_http_discover");
+        if (!persist(accessOutcome({
+          requestKind,
+          disposition: "completed",
+          reasonCode: "server_discovery_completed",
+          status: 200,
+          routeTargetSha256,
+          upstreamInvoked: false,
+        }))) return;
         sendJsonRpcResult(response, body.id, {
           capabilities: { tools: { listChanged: false } },
           cacheScope: "private",
@@ -281,6 +396,14 @@ function createMcpServer(
       }
       if (body.method === "tools/list") {
         assertExactKeys(body.params, ["_meta"], "guard_mcp_http_tools_list");
+        if (!persist(accessOutcome({
+          requestKind,
+          disposition: "completed",
+          reasonCode: "tool_list_completed",
+          status: 200,
+          routeTargetSha256,
+          upstreamInvoked: false,
+        }))) return;
         sendJsonRpcResult(response, body.id, {
           cacheScope: "private",
           ttlMs: 0,
@@ -298,16 +421,26 @@ function createMcpServer(
         throw new Error("guard_mcp_http_method_unsupported");
       }
       const toolCall = parseToolCall(body.params);
+      routeTargetSha256 = mcpHttpRouteTargetSha256(serverId, toolCall.name);
       const route = configuration.tool_routes.find(
         (candidate) =>
           candidate.server_id === serverId && candidate.tool_name === toolCall.name,
       );
       if (!route) {
+        if (!persist(accessOutcome({
+          requestKind,
+          disposition: "refused",
+          reasonCode: "tool_route_not_allowed",
+          status: 403,
+          routeTargetSha256,
+          upstreamInvoked: false,
+        }))) return;
         counters.blockedTool += 1;
         sendJsonRpcError(response, 403, body.id, -32001, "tool_route_not_allowed");
         return;
       }
-      const result = await adapter.invoke({
+      adapterStarted = true;
+      const result = await adapterForRequest().invoke({
         serverId: route.server_id,
         toolIdentity: route.tool_identity,
         toolRequestBody: Buffer.from(canonicalJson(toolCall.arguments)),
@@ -319,20 +452,164 @@ function createMcpServer(
         parentOccurrenceSha256: null,
         stateRootBefore: null,
       });
+      adapterResult = result;
       if (result.disposition === "completed" || result.response !== null) {
+        const nativeResult = parseNativeToolResult(result);
+        if (!persist(accessOutcomeForAdapter(
+          requestKind,
+          routeTargetSha256,
+          200,
+          result,
+        ))) return;
         counters.acceptedTool += 1;
         response.setHeader("x-gradia-occurrence-sha256", result.occurrenceSha256);
-        sendJsonRpcResult(response, body.id, parseNativeToolResult(result));
+        sendJsonRpcResult(response, body.id, nativeResult);
         return;
       }
+      const refusalStatus = result.disposition === "blocked" ? 403 : 502;
+      if (!persist(accessOutcomeForAdapter(
+        requestKind,
+        routeTargetSha256,
+        refusalStatus,
+        result,
+      ))) return;
       counters.blockedTool += 1;
       response.setHeader("x-gradia-occurrence-sha256", result.occurrenceSha256);
       sendAdapterRefusal(response, body.id, result);
-    } catch {
+    } catch (error) {
+      const reasonCode = classifyRequestFailure(error);
+      const status = reasonCode === "proxy_internal_failure" ? 500 : 400;
+      if (!persist(accessOutcome({
+        requestKind,
+        disposition: reasonCode === "proxy_internal_failure" ? "failed" : "refused",
+        reasonCode,
+        status,
+        routeTargetSha256,
+        upstreamInvoked:
+          adapterResult === null
+            ? adapterStarted
+              ? null
+              : false
+            : adapterResult.disposition !== "blocked",
+        adapterResult,
+      }))) return;
       counters.malformed += 1;
-      sendJsonRpcError(response, 400, null, -32600, "request_refused");
+      sendJsonRpcError(response, status, null, -32600, "request_refused");
     }
   });
+}
+
+function accessOutcome(input: {
+  requestKind: McpHttpRequestKind;
+  disposition: McpHttpAccessOutcome["disposition"];
+  reasonCode: McpHttpAccessReasonCode;
+  status: number;
+  routeTargetSha256: string | null;
+  upstreamInvoked: boolean | null;
+  adapterResult?: AuthenticatedMcpToolResult | null;
+}): McpHttpAccessOutcome {
+  return {
+    request_kind: input.requestKind,
+    disposition: input.disposition,
+    reason_code: input.reasonCode,
+    http_status: input.status,
+    route_target_sha256: input.routeTargetSha256,
+    upstream_invoked: input.upstreamInvoked,
+    sdk_disposition: input.adapterResult?.disposition ?? null,
+    sdk_occurrence_sha256: input.adapterResult?.occurrenceSha256 ?? null,
+  };
+}
+
+function accessOutcomeForAdapter(
+  requestKind: McpHttpRequestKind,
+  routeTargetSha256: string | null,
+  status: number,
+  result: AuthenticatedMcpToolResult,
+): McpHttpAccessOutcome {
+  const mapping: Record<
+    AuthenticatedMcpToolResult["disposition"],
+    {
+      disposition: McpHttpAccessOutcome["disposition"];
+      reasonCode: McpHttpAccessReasonCode;
+      upstreamInvoked: boolean;
+    }
+  > = {
+    blocked: {
+      disposition: "refused",
+      reasonCode: "adapter_policy_refused",
+      upstreamInvoked: false,
+    },
+    completed: {
+      disposition: "completed",
+      reasonCode: "tool_call_completed",
+      upstreamInvoked: true,
+    },
+    tool_failure: {
+      disposition: "failed",
+      reasonCode: "adapter_tool_failure",
+      upstreamInvoked: true,
+    },
+    protocol_failure: {
+      disposition: "failed",
+      reasonCode: "adapter_protocol_failed",
+      upstreamInvoked: true,
+    },
+    identity_mismatch: {
+      disposition: "failed",
+      reasonCode: "adapter_identity_mismatch",
+      upstreamInvoked: true,
+    },
+  };
+  const mapped = mapping[result.disposition];
+  return accessOutcome({
+    requestKind,
+    disposition: mapped.disposition,
+    reasonCode: mapped.reasonCode,
+    status,
+    routeTargetSha256,
+    upstreamInvoked: mapped.upstreamInvoked,
+    adapterResult: result,
+  });
+}
+
+function requestKindFor(method: string): McpHttpRequestKind {
+  if (method === "server/discover") return "server_discovery";
+  if (method === "tools/list") return "tool_list";
+  if (method === "tools/call") return "tool_call";
+  return "unknown";
+}
+
+function classifyRequestFailure(error: unknown): McpHttpAccessReasonCode {
+  const message = error instanceof Error ? error.message : "";
+  if (message === "guard_mcp_http_request_invalid") return "http_request_refused";
+  if (message.includes("url_invalid") || message.includes("server_not_configured")) {
+    return "target_refused";
+  }
+  if (
+    error instanceof SyntaxError ||
+    message.includes("request_too_large") ||
+    message.includes("request_empty") ||
+    message.includes("jsonrpc") ||
+    message.includes("id_invalid") ||
+    message.includes("method_invalid") ||
+    message.includes("params_invalid") ||
+    message.includes("tool_arguments_invalid") ||
+    message.includes("tool_name_invalid") ||
+    message.includes("keys_invalid")
+  ) {
+    return "body_refused";
+  }
+  if (
+    message.includes("protocol_version") ||
+    message.includes("method_header_mismatch") ||
+    message.includes("name_header_mismatch") ||
+    message.includes("request_meta_invalid") ||
+    message.includes("meta_protocol")
+  ) {
+    return "protocol_refused";
+  }
+  if (message.includes("method_unsupported")) return "rpc_method_refused";
+  return "proxy_internal_failure";
 }
 
 function validateConfigurationBody(body: GuardMcpHttpProxyConfigurationBody): void {

@@ -2,6 +2,17 @@
 
 All notable public changes to Gradia Guard are recorded here.
 
+## Unreleased
+
+- Added a durable, payload-digest-only HTTP access chain for the exact-route
+  MCP proxy. Every request that reaches the Node request listener now records
+  its authorization/origin presence, request shape, typed disposition, reason,
+  route digest, upstream status and optional SDK occurrence before a response.
+- Added account-free verification of the finalized access bundle and its
+  canonical fsync journal, including mutation, reordering, count-drift and
+  truncation refusals. Sessions with only pre-tool refusals finalize without
+  fabricating an empty G2 SDK bundle.
+
 ## 0.1.0-beta.2 — 2026-08-31
 
 - Added the governed evaluation router with exact policy/identity binding and
