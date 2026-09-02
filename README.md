@@ -32,7 +32,7 @@ npx @gradia/guard compare .gradia/evidence/before .gradia/evidence/after
 ```
 
 Before the npm beta is published, the exact tagged public source release can be
-installed with `npm install github:rudycelekli/gradia-guard#v0.1.0-beta.3`.
+installed with `npm install github:rudycelekli/gradia-guard#v0.1.0-beta.4`.
 Registry publication is a separate signed release event and is never inferred
 from this README.
 
@@ -76,7 +76,7 @@ same verifier source:
 
 ```yaml
 - uses: actions/checkout@v6
-- uses: rudycelekli/gradia-guard@v0.1.0-beta.3
+- uses: rudycelekli/gradia-guard@v0.1.0-beta.4
   id: proof
   with:
     proof-pack: path/to/proof-pack
@@ -340,6 +340,7 @@ digests.
 
 ```ts
 import {
+  McpHttpAccessRecorder,
   sealMcpHttpProxyConfiguration,
   startAuthenticatedMcpHttpProxy,
   verifyMcpHttpAccessBundleDirectory,
@@ -381,13 +382,43 @@ Origin/authentication, HTTP method/content type, target, body/envelope,
 protocol/header, unsupported RPC method, unlisted tool, policy, adapter and
 successful metadata/tool outcomes are distinct.
 
+If the process exits before `close()`, a new process may recover the exact v2
+access directory. Recovery replays the header and complete canonical journal,
+forbids further appends, and writes the final bundle through an exclusive
+atomic link so two recovery workers cannot overwrite each other:
+
+```ts
+const interrupted = McpHttpAccessRecorder.recover(
+  ".gradia/evidence/mcp-proxy-1/mcp-http-access",
+  () => new Date().toISOString(),
+);
+const recoveredBundle = interrupted.finalize();
+if (recoveredBundle.finalization.schema_version !==
+    "gradia.guard.mcp-http-access-finalization.v2" ||
+    recoveredBundle.finalization.terminal_status !== "recovered_interruption") {
+  throw new Error("unexpected_recovery_state");
+}
+```
+
+The account-free equivalents are:
+
+```sh
+gradia-guard mcp-http recover .gradia/evidence/mcp-proxy-1/mcp-http-access
+gradia-guard mcp-http verify .gradia/evidence/mcp-proxy-1/mcp-http-access
+```
+
+Finalized beta.3 v1 bundles remain verifiable. An unfinalized v1 prefix is
+refused because its signed header explicitly fixed recovery support to false.
+`recovered_interruption` is a recorder-lifecycle fact, not proof of an
+operating-system crash. Recovery cannot resume the proxy or reconstruct a
+request that never became a durable receipt.
+
 If every request is refused before a tool decision, `close()` returns
 `sdk_bundle_directory: null` and no empty SDK evidence bundle is fabricated;
 the HTTP access bundle remains complete for the observed listener boundary.
-The access recorder does not claim crash recovery. Socket-parser failures,
-requests outside this proxy and a process crash before a receipt is durable are
-explicitly unobserved; a normally finalized bundle cannot prove those events
-did not occur.
+Socket-parser failures, requests outside this proxy and a process crash before
+a receipt is durable remain explicitly unobserved; clean or recovered
+finalization cannot prove those events did not occur.
 
 This first proxy edition deliberately supports only MCP `2026-07-28`; it is not
 a compatibility claim for handshake-era clients, streaming subscriptions,

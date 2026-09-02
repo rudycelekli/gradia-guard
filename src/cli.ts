@@ -32,6 +32,10 @@ import { verifyGuardRemoteAnchor } from "./remote-anchor.js";
 import { verifyKubernetesEnforcementReceipt } from "./kubernetes-enforcement.js";
 import { verifyKubernetesIdentityExchangeReceipt } from "./kubernetes-identity-exchange.js";
 import {
+  McpHttpAccessRecorder,
+  verifyMcpHttpAccessBundleDirectory,
+} from "./mcp-http-evidence.js";
+import {
   composeRuntimeEvidence,
   verifyRuntimeCompositionReceipt,
 } from "./runtime-composition.js";
@@ -90,10 +94,48 @@ async function main(argv: string[]): Promise<number> {
   if (command === "proof-pack") return proofPackCommand(rest);
   if (command === "sdk-matrix") return sdkMatrixCommand(rest);
   if (command === "framework-matrix") return frameworkMatrixCommand(rest);
+  if (command === "mcp-http") return mcpHttpCommand(rest);
   if (command === "runtime") return await runtimeCommand(rest);
   if (command === "upload") return await uploadCommand(rest);
   process.stderr.write(`unknown command: ${command}\n\n${help()}`);
   return 2;
+}
+
+function mcpHttpCommand(argv: string[]): number {
+  const [subcommand, directory, ...rest] = argv;
+  if (
+    (subcommand !== "verify" && subcommand !== "recover")
+    || !directory
+    || directory.startsWith("-")
+    || rest.length > 0
+  ) {
+    throw new Error(`mcp_http_subcommand_invalid:${subcommand ?? "missing"}`);
+  }
+  const resolved = resolve(directory);
+  if (subcommand === "verify") {
+    const verification = verifyMcpHttpAccessBundleDirectory(resolved);
+    process.stdout.write(`${canonicalJson(verification)}\n`);
+    return verification.ok ? 0 : 1;
+  }
+  const recorder = McpHttpAccessRecorder.recover(
+    resolved,
+    () => new Date().toISOString(),
+  );
+  const bundle = recorder.finalize();
+  const verification = verifyMcpHttpAccessBundleDirectory(resolved);
+  if (!verification.ok) {
+    throw new Error(`mcp_http_recovered_bundle_unverified:${verification.blockers.join(",")}`);
+  }
+  process.stdout.write(`${canonicalJson({
+    bundle_path: recorder.bundlePath,
+    chain_head_sha256: bundle.finalization.chain_head_sha256,
+    ok: true,
+    receipt_count: bundle.finalization.receipt_count,
+    recovery_performed: true,
+    session_id: bundle.finalization.session_id,
+    terminal_status: "recovered_interruption",
+  })}\n`);
+  return 0;
 }
 
 function doctorCommand(argv: string[]): number {
@@ -1051,7 +1093,7 @@ function proofPackCommand(argv: string[]): number {
 }
 
 function help(): string {
-  return `Gradia Guard 0.1.0-beta.3
+  return `Gradia Guard 0.1.0-beta.4
 
 Usage:
   gradia-guard run [--out DIR] [--spool digest-only|encrypted] [--key-env NAME --key-id ID] -- COMMAND [ARGS...]
@@ -1076,6 +1118,8 @@ Usage:
   gradia-guard readiness assess [--json] PROFILE_FILE BUNDLE_DIR
   gradia-guard sdk-matrix [--json]
   gradia-guard framework-matrix [--json]
+  gradia-guard mcp-http verify MCP_HTTP_ACCESS_BUNDLE_DIR
+  gradia-guard mcp-http recover INTERRUPTED_MCP_HTTP_ACCESS_DIR
   gradia-guard runtime verify BUNDLE_FILE
   gradia-guard runtime upload --api-base HTTPS_ORIGIN --project ID [--token-env NAME]
     [--retention-policy ID] [--allow-evaluation] [--allow-redistribution]
@@ -1158,6 +1202,13 @@ Proof Pack verification is local and account-free. Its versioned profile
 recomputes the frame chain, exploit semantics, every published aggregate and the
 manifest self-digest. A passing result proves integrity and derivation only—not
 authorship, timestamp, data rights, runtime enforcement, or scientific validity.
+
+MCP HTTP verification is local and account-free. Recovery independently
+replays one unfinalized v2 header and fsync journal, refuses malformed,
+noncanonical, truncated, legacy or already-finalized prefixes, and writes one
+atomic terminal bundle labeled recovered_interruption. It cannot resume the
+proxy, prove the cause of interruption, or reconstruct requests that were not
+durably appended.
 
 Runtime collect-docker asks the Docker daemon for the exact agent, gateway, and network
 posture, then launches one blocked-direct-egress probe and one allowed-gateway probe from
