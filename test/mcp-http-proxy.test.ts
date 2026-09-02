@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
-import { appendFileSync, existsSync, mkdtempSync, readFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -8,7 +16,12 @@ import {
   canonicalJson,
   digestCanonical,
   issueWorkloadIdentity,
+  MCP_HTTP_ACCESS_FINALIZATION_SCHEMA_VERSION_V1,
+  MCP_HTTP_ACCESS_HEADER_SCHEMA_VERSION_V1,
+  MCP_HTTP_ACCESS_RECEIPT_SCHEMA_VERSION,
   MCP_HTTP_PROXY_PROTOCOL_VERSION,
+  McpHttpAccessRecorder,
+  mcpHttpRequestEvidence,
   sealMcpHttpProxyConfiguration,
   sealPolicy,
   startAuthenticatedMcpHttpProxy,
@@ -257,6 +270,15 @@ test("modern MCP HTTP discovery and exact tool call produce verified secret-free
     accessEvidence,
     new RegExp((environment["GRADIA_GUARD_MCP_AUTHORIZATION"] as string).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
   );
+  const accessBundle = JSON.parse(
+    readFileSync(join(accessDirectory, "bundle.json"), "utf8"),
+  ) as McpHttpAccessBundle;
+  assert.equal(accessBundle.header.crash_recovery_supported, true);
+  assert.equal(accessBundle.finalization.schema_version, "gradia.guard.mcp-http-access-finalization.v2");
+  if (accessBundle.finalization.schema_version === "gradia.guard.mcp-http-access-finalization.v2") {
+    assert.equal(accessBundle.finalization.terminal_status, "completed");
+    assert.equal(accessBundle.finalization.recovery_performed, false);
+  }
 });
 
 test("unlisted tools, header mismatch, wrong capability, and browser origins never invoke upstream", async () => {
@@ -387,6 +409,19 @@ test("HTTP access verifier refuses mutation, reorder, count drift, and journal t
   shortened.receipts = shortened.receipts.slice(0, 1);
   assert.equal(verifyMcpHttpAccessBundle(shortened).ok, false);
 
+  const falseRecovery = JSON.parse(canonicalJson(original)) as McpHttpAccessBundle;
+  if (falseRecovery.finalization.schema_version === "gradia.guard.mcp-http-access-finalization.v2") {
+    falseRecovery.finalization.recovery_performed = true;
+    const body = { ...falseRecovery.finalization };
+    delete (body as Partial<typeof body> & { finalization_sha256?: string }).finalization_sha256;
+    falseRecovery.finalization.finalization_sha256 = digestCanonical(body);
+  }
+  const falseRecoveryVerification = verifyMcpHttpAccessBundle(falseRecovery);
+  assert.equal(falseRecoveryVerification.ok, false);
+  assert.ok(
+    falseRecoveryVerification.blockers.includes("mcp_http_access_recovery_terminal_mismatch"),
+  );
+
   appendFileSync(join(accessDirectory, "receipts.ndjson"), "{", "utf8");
   const truncated = verifyMcpHttpAccessBundleDirectory(accessDirectory);
   assert.equal(truncated.ok, false);
@@ -405,6 +440,246 @@ test("HTTP access verifier fails closed rather than throwing on arbitrary malfor
     assert.equal(result.ok, false);
     assert.ok(result.blockers.length > 0);
   }
+});
+
+test("HTTP access recorder recovers a valid durable prefix only as an interrupted session", () => {
+  const accessDirectory = directory();
+  const recorder = new McpHttpAccessRecorder({
+    directory: accessDirectory,
+    sessionId: "mcp-http-recovery",
+    createdAt: "2026-09-02T12:00:00.000Z",
+    configurationSha256: configuration().configuration_sha256,
+    policySha256: policy().policy_sha256,
+    workloadIdentitySha256: digestCanonical({ workload: "recovery" }),
+    now: () => "2026-09-02T12:01:00.000Z",
+  });
+  const appendInput = {
+    requestId: "request-before-interruption",
+    request: mcpHttpRequestEvidence({
+      method: "POST",
+      target: "/mcp/case-tools",
+      rawHeaders: ["content-type", "application/json"],
+      body: Buffer.from("{}"),
+    }),
+    outcome: {
+      request_kind: "tool_list" as const,
+      disposition: "completed" as const,
+      reason_code: "tool_list_completed" as const,
+      http_status: 200,
+      route_target_sha256: digestCanonical({ server_id: "case-tools", tool_name: null }),
+      upstream_invoked: false,
+      sdk_disposition: null,
+      sdk_occurrence_sha256: null,
+    },
+  };
+  recorder.append(appendInput);
+
+  const recovered = McpHttpAccessRecorder.recover(
+    accessDirectory,
+    () => "2026-09-02T12:02:00.000Z",
+  );
+  assert.throws(
+    () => recovered.append({ ...appendInput, requestId: "request-after-recovery" }),
+    /mcp_http_access_recovered_session_write/,
+  );
+  const bundle = recovered.finalize();
+  assert.equal(bundle.finalization.schema_version, "gradia.guard.mcp-http-access-finalization.v2");
+  if (bundle.finalization.schema_version === "gradia.guard.mcp-http-access-finalization.v2") {
+    assert.equal(bundle.finalization.terminal_status, "recovered_interruption");
+    assert.equal(bundle.finalization.recovery_performed, true);
+  }
+  assert.equal(bundle.receipts.length, 1);
+  const verified = verifyMcpHttpAccessBundleDirectory(accessDirectory);
+  assert.equal(verified.ok, true, verified.blockers.join(","));
+  assert.throws(
+    () => McpHttpAccessRecorder.recover(accessDirectory, () => "2026-09-02T12:03:00.000Z"),
+    /mcp_http_access_already_finalized/,
+  );
+});
+
+test("HTTP access recovery finalization is atomic and cannot be overwritten", () => {
+  const accessDirectory = directory();
+  new McpHttpAccessRecorder({
+    directory: accessDirectory,
+    sessionId: "mcp-http-concurrent-recovery",
+    createdAt: "2026-09-02T12:00:00.000Z",
+    configurationSha256: configuration().configuration_sha256,
+    policySha256: policy().policy_sha256,
+    workloadIdentitySha256: digestCanonical({ workload: "concurrent" }),
+    now: () => "2026-09-02T12:01:00.000Z",
+  });
+  const first = McpHttpAccessRecorder.recover(
+    accessDirectory,
+    () => "2026-09-02T12:02:00.000Z",
+  );
+  const second = McpHttpAccessRecorder.recover(
+    accessDirectory,
+    () => "2026-09-02T12:03:00.000Z",
+  );
+  const firstBundle = first.finalize();
+  assert.throws(() => second.finalize(), /mcp_http_access_bundle_exists/);
+  const persisted = JSON.parse(
+    readFileSync(join(accessDirectory, "bundle.json"), "utf8"),
+  ) as McpHttpAccessBundle;
+  assert.equal(canonicalJson(persisted), canonicalJson(firstBundle));
+  const verified = verifyMcpHttpAccessBundleDirectory(accessDirectory);
+  assert.equal(verified.ok, true, verified.blockers.join(","));
+});
+
+test("MCP HTTP CLI recovers and then independently verifies an interrupted prefix", () => {
+  const accessDirectory = directory();
+  new McpHttpAccessRecorder({
+    directory: accessDirectory,
+    sessionId: "mcp-http-cli-recovery",
+    createdAt: "2026-09-02T12:00:00.000Z",
+    configurationSha256: configuration().configuration_sha256,
+    policySha256: policy().policy_sha256,
+    workloadIdentitySha256: digestCanonical({ workload: "cli-recovery" }),
+    now: () => "2026-09-02T12:01:00.000Z",
+  });
+  const recovered = JSON.parse(
+    execFileSync(
+      process.execPath,
+      ["dist/src/cli.js", "mcp-http", "recover", accessDirectory],
+      { cwd: process.cwd(), encoding: "utf8" },
+    ),
+  ) as Record<string, unknown>;
+  assert.equal(recovered["ok"], true);
+  assert.equal(recovered["terminal_status"], "recovered_interruption");
+  assert.equal(recovered["recovery_performed"], true);
+  const verified = JSON.parse(
+    execFileSync(
+      process.execPath,
+      ["dist/src/cli.js", "mcp-http", "verify", accessDirectory],
+      { cwd: process.cwd(), encoding: "utf8" },
+    ),
+  ) as Record<string, unknown>;
+  assert.equal(verified["ok"], true);
+  assert.equal(verified["receipt_count"], 0);
+});
+
+test("HTTP access recovery refuses a truncated durable prefix", () => {
+  const accessDirectory = directory();
+  const recorder = new McpHttpAccessRecorder({
+    directory: accessDirectory,
+    sessionId: "mcp-http-truncated-recovery",
+    createdAt: "2026-09-02T12:00:00.000Z",
+    configurationSha256: configuration().configuration_sha256,
+    policySha256: policy().policy_sha256,
+    workloadIdentitySha256: digestCanonical({ workload: "truncated" }),
+    now: () => "2026-09-02T12:01:00.000Z",
+  });
+  recorder.append({
+    requestId: "request-before-truncation",
+    request: mcpHttpRequestEvidence({
+      method: "GET",
+      target: "/mcp/case-tools",
+      rawHeaders: [],
+      body: null,
+    }),
+    outcome: {
+      request_kind: "unknown",
+      disposition: "refused",
+      reason_code: "http_request_refused",
+      http_status: 400,
+      route_target_sha256: null,
+      upstream_invoked: null,
+      sdk_disposition: null,
+      sdk_occurrence_sha256: null,
+    },
+  });
+  appendFileSync(join(accessDirectory, "receipts.ndjson"), "{", "utf8");
+  assert.throws(
+    () => McpHttpAccessRecorder.recover(accessDirectory, () => "2026-09-02T12:02:00.000Z"),
+    /mcp_http_access_recovery_invalid:mcp_http_access_journal_json_invalid:1,mcp_http_access_journal_truncated/,
+  );
+  assert.equal(existsSync(join(accessDirectory, "bundle.json")), false);
+});
+
+test("HTTP access verifier preserves finalized beta.3 v1 bundle compatibility", async () => {
+  const { instance, root } = await proxy(async () => successfulResponse());
+  const environment = instance.childEnvironment("case-tools");
+  await post(
+    environment["GRADIA_GUARD_MCP_ENDPOINT"] as string,
+    environment,
+    { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
+  );
+  await instance.close();
+  const current = JSON.parse(
+    readFileSync(join(root, "mcp-http-access", "bundle.json"), "utf8"),
+  ) as McpHttpAccessBundle;
+  const headerBody = {
+    ...current.header,
+    schema_version: MCP_HTTP_ACCESS_HEADER_SCHEMA_VERSION_V1,
+    crash_recovery_supported: false as const,
+  };
+  delete (headerBody as Partial<typeof headerBody> & { header_sha256?: string }).header_sha256;
+  const header = { ...headerBody, header_sha256: digestCanonical(headerBody) };
+  let head = "0".repeat(64);
+  const receipts = current.receipts.map((source, sequence) => {
+    const body = {
+      ...source,
+      schema_version: MCP_HTTP_ACCESS_RECEIPT_SCHEMA_VERSION,
+      header_sha256: header.header_sha256,
+      sequence,
+      previous_receipt_sha256: head,
+    };
+    delete (body as Partial<typeof body> & { receipt_sha256?: string }).receipt_sha256;
+    const receipt = { ...body, receipt_sha256: digestCanonical(body) };
+    head = receipt.receipt_sha256;
+    return receipt;
+  });
+  const finalizationBody = {
+    schema_version: MCP_HTTP_ACCESS_FINALIZATION_SCHEMA_VERSION_V1,
+    session_id: header.session_id,
+    header_sha256: header.header_sha256,
+    finalized_at: current.finalization.finalized_at,
+    receipt_count: receipts.length,
+    chain_head_sha256: head,
+    counters: current.finalization.counters,
+  };
+  const legacyBundle = {
+    header,
+    receipts,
+    finalization: {
+      ...finalizationBody,
+      finalization_sha256: digestCanonical(finalizationBody),
+    },
+  };
+  const verified = verifyMcpHttpAccessBundle(legacyBundle);
+  assert.equal(verified.ok, true, verified.blockers.join(","));
+  const legacyDirectory = directory();
+  mkdirSync(legacyDirectory, { mode: 0o700 });
+  writeFileSync(join(legacyDirectory, "header.json"), `${canonicalJson(header)}\n`, {
+    mode: 0o600,
+  });
+  writeFileSync(
+    join(legacyDirectory, "receipts.ndjson"),
+    receipts.map((receipt) => canonicalJson(receipt)).join("\n") + "\n",
+    { mode: 0o600 },
+  );
+  writeFileSync(join(legacyDirectory, "bundle.json"), `${canonicalJson(legacyBundle)}\n`, {
+    mode: 0o600,
+  });
+  const directoryVerification = verifyMcpHttpAccessBundleDirectory(legacyDirectory);
+  assert.equal(directoryVerification.ok, true, directoryVerification.blockers.join(","));
+  const legacyPrefixDirectory = directory();
+  mkdirSync(legacyPrefixDirectory, { mode: 0o700 });
+  writeFileSync(join(legacyPrefixDirectory, "header.json"), `${canonicalJson(header)}\n`, {
+    mode: 0o600,
+  });
+  writeFileSync(
+    join(legacyPrefixDirectory, "receipts.ndjson"),
+    receipts.map((receipt) => canonicalJson(receipt)).join("\n") + "\n",
+    { mode: 0o600 },
+  );
+  assert.throws(
+    () => McpHttpAccessRecorder.recover(
+      legacyPrefixDirectory,
+      () => "2026-09-02T12:02:00.000Z",
+    ),
+    /mcp_http_access_recovery_not_supported_by_header/,
+  );
 });
 
 test("HTTP method, target, and malformed body refusals are durable and never invoke upstream", async () => {

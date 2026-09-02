@@ -3,22 +3,28 @@ import {
   closeSync,
   existsSync,
   fsyncSync,
+  linkSync,
   mkdirSync,
   openSync,
   readFileSync,
   renameSync,
+  unlinkSync,
   writeSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { canonicalJson, digestCanonical, isSha256, sha256 } from "./canonical.js";
 import { assertStableId } from "./security.js";
 
-export const MCP_HTTP_ACCESS_HEADER_SCHEMA_VERSION =
+export const MCP_HTTP_ACCESS_HEADER_SCHEMA_VERSION_V1 =
   "gradia.guard.mcp-http-access-header.v1" as const;
+export const MCP_HTTP_ACCESS_HEADER_SCHEMA_VERSION =
+  "gradia.guard.mcp-http-access-header.v2" as const;
 export const MCP_HTTP_ACCESS_RECEIPT_SCHEMA_VERSION =
   "gradia.guard.mcp-http-access-receipt.v1" as const;
-export const MCP_HTTP_ACCESS_FINALIZATION_SCHEMA_VERSION =
+export const MCP_HTTP_ACCESS_FINALIZATION_SCHEMA_VERSION_V1 =
   "gradia.guard.mcp-http-access-finalization.v1" as const;
+export const MCP_HTTP_ACCESS_FINALIZATION_SCHEMA_VERSION =
+  "gradia.guard.mcp-http-access-finalization.v2" as const;
 export const MCP_HTTP_ACCESS_GENESIS_SHA256 = "0".repeat(64);
 
 export type McpHttpRequestKind =
@@ -64,6 +70,23 @@ export interface McpHttpAccessHeaderBody {
     "requests_outside_this_proxy_socket_parser_rejections_and_process_crashes_before_receipt_are_not_observed";
   payload_retention: "digest_only";
   authorization_value_retained: false;
+  crash_recovery_supported: true;
+  configuration_sha256: string;
+  policy_sha256: string;
+  workload_identity_sha256: string;
+  workload_identity_verified_at_start: true;
+}
+
+export interface McpHttpAccessHeaderV1Body {
+  schema_version: typeof MCP_HTTP_ACCESS_HEADER_SCHEMA_VERSION_V1;
+  session_id: string;
+  created_at: string;
+  capture_boundary: "loopback_mcp_http_request_listener";
+  bypass_possible: true;
+  bypass_declaration:
+    "requests_outside_this_proxy_socket_parser_rejections_and_process_crashes_before_receipt_are_not_observed";
+  payload_retention: "digest_only";
+  authorization_value_retained: false;
   crash_recovery_supported: false;
   configuration_sha256: string;
   policy_sha256: string;
@@ -71,9 +94,9 @@ export interface McpHttpAccessHeaderBody {
   workload_identity_verified_at_start: true;
 }
 
-export interface McpHttpAccessHeader extends McpHttpAccessHeaderBody {
-  header_sha256: string;
-}
+export type McpHttpAccessHeaderV1 = McpHttpAccessHeaderV1Body & { header_sha256: string };
+export type McpHttpAccessHeaderV2 = McpHttpAccessHeaderBody & { header_sha256: string };
+export type McpHttpAccessHeader = McpHttpAccessHeaderV1 | McpHttpAccessHeaderV2;
 
 export interface McpHttpRequestEvidence {
   http_method_kind: "post" | "other";
@@ -137,11 +160,29 @@ export interface McpHttpAccessFinalizationBody {
   receipt_count: number;
   chain_head_sha256: string;
   counters: McpHttpAccessCounters;
+  terminal_status: "completed" | "recovered_interruption";
+  recovery_performed: boolean;
 }
 
-export interface McpHttpAccessFinalization extends McpHttpAccessFinalizationBody {
-  finalization_sha256: string;
+export interface McpHttpAccessFinalizationV1Body {
+  schema_version: typeof MCP_HTTP_ACCESS_FINALIZATION_SCHEMA_VERSION_V1;
+  session_id: string;
+  header_sha256: string;
+  finalized_at: string;
+  receipt_count: number;
+  chain_head_sha256: string;
+  counters: McpHttpAccessCounters;
 }
+
+export type McpHttpAccessFinalizationV1 = McpHttpAccessFinalizationV1Body & {
+  finalization_sha256: string;
+};
+export type McpHttpAccessFinalizationV2 = McpHttpAccessFinalizationBody & {
+  finalization_sha256: string;
+};
+export type McpHttpAccessFinalization =
+  | McpHttpAccessFinalizationV1
+  | McpHttpAccessFinalizationV2;
 
 export interface McpHttpAccessBundle {
   header: McpHttpAccessHeader;
@@ -179,10 +220,11 @@ export class McpHttpAccessRecorder {
   readonly headerPath: string;
   readonly receiptsPath: string;
   readonly bundlePath: string;
-  readonly header: McpHttpAccessHeader;
+  readonly header: McpHttpAccessHeaderV2;
   private readonly now: () => string;
   private receiptList: McpHttpAccessReceipt[] = [];
   private finalized = false;
+  private recoveredFromInterruption = false;
 
   constructor(options: McpHttpAccessRecorderOptions) {
     if (existsSync(options.directory)) throw new Error("mcp_http_access_directory_exists");
@@ -206,7 +248,7 @@ export class McpHttpAccessRecorder {
         "requests_outside_this_proxy_socket_parser_rejections_and_process_crashes_before_receipt_are_not_observed",
       payload_retention: "digest_only",
       authorization_value_retained: false,
-      crash_recovery_supported: false,
+      crash_recovery_supported: true,
       configuration_sha256: options.configurationSha256,
       policy_sha256: options.policySha256,
       workload_identity_sha256: options.workloadIdentitySha256,
@@ -225,12 +267,63 @@ export class McpHttpAccessRecorder {
     writeDurableNewFile(this.receiptsPath, "");
   }
 
+  private static fromRecovered(
+    directory: string,
+    header: McpHttpAccessHeaderV2,
+    receipts: McpHttpAccessReceipt[],
+    now: () => string,
+  ): McpHttpAccessRecorder {
+    const recorder = Object.create(McpHttpAccessRecorder.prototype) as McpHttpAccessRecorder;
+    Object.defineProperties(recorder, {
+      directory: { value: directory, enumerable: true },
+      headerPath: { value: join(directory, "header.json"), enumerable: true },
+      receiptsPath: { value: join(directory, "receipts.ndjson"), enumerable: true },
+      bundlePath: { value: join(directory, "bundle.json"), enumerable: true },
+      header: { value: header, enumerable: true },
+      now: { value: now, writable: false },
+      receiptList: { value: receipts, writable: true },
+      finalized: { value: false, writable: true },
+      recoveredFromInterruption: { value: true, writable: true },
+    });
+    return recorder;
+  }
+
+  /**
+   * Recover one valid durable prefix and close it only as an interrupted
+   * session. Recovery never resumes request capture and does not establish the
+   * cause of interruption or reconstruct requests that were not appended.
+   */
+  static recover(directory: string, now: () => string): McpHttpAccessRecorder {
+    if (existsSync(join(directory, "bundle.json"))) {
+      throw new Error("mcp_http_access_already_finalized");
+    }
+    const prefix = readMcpHttpAccessPrefixDirectory(directory);
+    if (prefix.blockers.length > 0 || prefix.header === null) {
+      throw new Error(`mcp_http_access_recovery_invalid:${prefix.blockers.join(",")}`);
+    }
+    if (
+      prefix.header.schema_version !== MCP_HTTP_ACCESS_HEADER_SCHEMA_VERSION
+      || prefix.header.crash_recovery_supported !== true
+    ) {
+      throw new Error("mcp_http_access_recovery_not_supported_by_header");
+    }
+    return McpHttpAccessRecorder.fromRecovered(
+      directory,
+      prefix.header,
+      [...prefix.receipts],
+      now,
+    );
+  }
+
   get receipts(): readonly McpHttpAccessReceipt[] {
     return Object.freeze([...this.receiptList]);
   }
 
   append(input: McpHttpAccessAppendInput): McpHttpAccessReceipt {
     if (this.finalized) throw new Error("mcp_http_access_post_finalization_write");
+    if (this.recoveredFromInterruption) {
+      throw new Error("mcp_http_access_recovered_session_write");
+    }
     assertStableId(input.requestId, "mcp_http_access_request_id");
     const observedAt = this.now();
     requireTimestamp(observedAt, "mcp_http_access_observed_at_invalid");
@@ -270,6 +363,10 @@ export class McpHttpAccessRecorder {
       chain_head_sha256:
         this.receiptList.at(-1)?.receipt_sha256 ?? MCP_HTTP_ACCESS_GENESIS_SHA256,
       counters: countersFor(this.receiptList),
+      terminal_status: this.recoveredFromInterruption
+        ? "recovered_interruption"
+        : "completed",
+      recovery_performed: this.recoveredFromInterruption,
     };
     const finalization: McpHttpAccessFinalization = {
       ...finalizationBody,
@@ -284,7 +381,11 @@ export class McpHttpAccessRecorder {
     if (!verification.ok) {
       throw new Error(`mcp_http_access_bundle_unverified:${verification.blockers.join(",")}`);
     }
-    writeDurableCanonical(this.bundlePath, bundle);
+    writeDurableCanonicalExclusive(
+      this.bundlePath,
+      bundle,
+      "mcp_http_access_bundle_exists",
+    );
     this.finalized = true;
     return bundle;
   }
@@ -367,37 +468,9 @@ export function verifyMcpHttpAccessBundle(value: unknown): McpHttpAccessVerifica
 }
 
 export function verifyMcpHttpAccessBundleDirectory(directory: string): McpHttpAccessVerification {
-  const blockers: string[] = [];
-  let header: unknown = null;
-  let receipts: unknown[] = [];
+  const prefix = readMcpHttpAccessPrefixDirectory(directory);
+  const blockers = [...prefix.blockers];
   let bundle: unknown = null;
-  try {
-    header = JSON.parse(readFileSync(join(directory, "header.json"), "utf8")) as unknown;
-  } catch {
-    blockers.push("mcp_http_access_header_unreadable");
-  }
-  try {
-    const journal = readFileSync(join(directory, "receipts.ndjson"), "utf8");
-    if (journal.length > 0 && !journal.endsWith("\n")) {
-      blockers.push("mcp_http_access_journal_truncated");
-    }
-    receipts = journal
-      .split("\n")
-      .filter((line) => line.length > 0)
-      .map((line, index) => {
-        try {
-          const parsed = JSON.parse(line) as unknown;
-          if (canonicalJson(parsed) !== line) blockers.push(`mcp_http_access_journal_noncanonical:${index}`);
-          return parsed;
-        } catch {
-          blockers.push(`mcp_http_access_journal_json_invalid:${index}`);
-          return null;
-        }
-      })
-      .filter((item): item is unknown => item !== null);
-  } catch {
-    blockers.push("mcp_http_access_journal_unreadable");
-  }
   try {
     bundle = JSON.parse(readFileSync(join(directory, "bundle.json"), "utf8")) as unknown;
   } catch {
@@ -406,10 +479,10 @@ export function verifyMcpHttpAccessBundleDirectory(directory: string): McpHttpAc
   const verified = verifyMcpHttpAccessBundle(bundle);
   blockers.push(...verified.blockers);
   if (isRecord(bundle)) {
-    if (canonicalJson(bundle["header"]) !== canonicalJson(header)) {
+    if (canonicalJson(bundle["header"]) !== canonicalJson(prefix.header)) {
       blockers.push("mcp_http_access_header_file_mismatch");
     }
-    if (canonicalJson(bundle["receipts"]) !== canonicalJson(receipts)) {
+    if (canonicalJson(bundle["receipts"]) !== canonicalJson(prefix.receipts)) {
       blockers.push("mcp_http_access_journal_bundle_mismatch");
     }
   }
@@ -439,13 +512,21 @@ function headerBlockers(header: McpHttpAccessHeader): string[] {
     "workload_identity_sha256",
     "workload_identity_verified_at_start",
   ], "mcp_http_access_header", blockers);
-  if (header.schema_version !== MCP_HTTP_ACCESS_HEADER_SCHEMA_VERSION) blockers.push("mcp_http_access_header_schema_invalid");
+  if (
+    header.schema_version !== MCP_HTTP_ACCESS_HEADER_SCHEMA_VERSION
+    && header.schema_version !== MCP_HTTP_ACCESS_HEADER_SCHEMA_VERSION_V1
+  ) blockers.push("mcp_http_access_header_schema_invalid");
   try { assertStableId(header.session_id, "mcp_http_access_session_id"); } catch { blockers.push("mcp_http_access_session_id_invalid"); }
   if (!timestampValid(header.created_at)) blockers.push("mcp_http_access_created_at_invalid");
   if (header.capture_boundary !== "loopback_mcp_http_request_listener") blockers.push("mcp_http_access_boundary_invalid");
   if (header.bypass_possible !== true || header.bypass_declaration !== "requests_outside_this_proxy_socket_parser_rejections_and_process_crashes_before_receipt_are_not_observed") blockers.push("mcp_http_access_bypass_declaration_invalid");
   if (header.payload_retention !== "digest_only" || header.authorization_value_retained !== false) blockers.push("mcp_http_access_secret_retention_invalid");
-  if (header.crash_recovery_supported !== false) blockers.push("mcp_http_access_crash_claim_invalid");
+  if (
+    (header.schema_version === MCP_HTTP_ACCESS_HEADER_SCHEMA_VERSION
+      && header.crash_recovery_supported !== true)
+    || (header.schema_version === MCP_HTTP_ACCESS_HEADER_SCHEMA_VERSION_V1
+      && header.crash_recovery_supported !== false)
+  ) blockers.push("mcp_http_access_crash_claim_invalid");
   if (header.workload_identity_verified_at_start !== true) blockers.push("mcp_http_access_identity_verification_missing");
   for (const [label, digest] of [
     ["configuration", header.configuration_sha256],
@@ -559,16 +640,44 @@ function finalizationBlockers(
   finalization: McpHttpAccessFinalization,
 ): string[] {
   const blockers: string[] = [];
+  const isV2 = finalization.schema_version === MCP_HTTP_ACCESS_FINALIZATION_SCHEMA_VERSION;
   exactKeys(finalization as unknown as Record<string, unknown>, [
     "chain_head_sha256", "counters", "finalization_sha256", "finalized_at",
     "header_sha256", "receipt_count", "schema_version", "session_id",
+    ...(isV2 ? ["recovery_performed", "terminal_status"] : []),
   ], "mcp_http_access_finalization", blockers);
-  if (finalization.schema_version !== MCP_HTTP_ACCESS_FINALIZATION_SCHEMA_VERSION) blockers.push("mcp_http_access_finalization_schema_invalid");
+  if (
+    finalization.schema_version !== MCP_HTTP_ACCESS_FINALIZATION_SCHEMA_VERSION
+    && finalization.schema_version !== MCP_HTTP_ACCESS_FINALIZATION_SCHEMA_VERSION_V1
+  ) blockers.push("mcp_http_access_finalization_schema_invalid");
   if (!timestampValid(finalization.finalized_at)) blockers.push("mcp_http_access_finalized_at_invalid");
   if (header !== null) {
     if (finalization.session_id !== header.session_id) blockers.push("mcp_http_access_finalization_session_mismatch");
     if (finalization.header_sha256 !== header.header_sha256) blockers.push("mcp_http_access_finalization_header_mismatch");
     if (finalization.finalized_at < header.created_at) blockers.push("mcp_http_access_finalized_before_creation");
+    const expectedFinalizationSchema = header.schema_version === MCP_HTTP_ACCESS_HEADER_SCHEMA_VERSION
+      ? MCP_HTTP_ACCESS_FINALIZATION_SCHEMA_VERSION
+      : MCP_HTTP_ACCESS_FINALIZATION_SCHEMA_VERSION_V1;
+    if (finalization.schema_version !== expectedFinalizationSchema) {
+      blockers.push("mcp_http_access_finalization_header_schema_mismatch");
+    }
+  }
+  const lastObservedAt = receipts.at(-1)?.observed_at;
+  if (lastObservedAt !== undefined && finalization.finalized_at < lastObservedAt) {
+    blockers.push("mcp_http_access_finalized_before_last_receipt");
+  }
+  if (isV2) {
+    const v2 = finalization as McpHttpAccessFinalizationV2;
+    if (v2.terminal_status !== "completed" && v2.terminal_status !== "recovered_interruption") {
+      blockers.push("mcp_http_access_terminal_status_invalid");
+    }
+    if (typeof v2.recovery_performed !== "boolean") {
+      blockers.push("mcp_http_access_recovery_state_invalid");
+    } else if (
+      v2.recovery_performed !== (v2.terminal_status === "recovered_interruption")
+    ) {
+      blockers.push("mcp_http_access_recovery_terminal_mismatch");
+    }
   }
   if (finalization.receipt_count !== receipts.length) blockers.push("mcp_http_access_finalization_count_mismatch");
   const expectedHead = receipts.at(-1)?.receipt_sha256 ?? MCP_HTTP_ACCESS_GENESIS_SHA256;
@@ -641,6 +750,66 @@ function verification(
   };
 }
 
+function readMcpHttpAccessPrefixDirectory(directory: string): {
+  blockers: readonly string[];
+  header: McpHttpAccessHeader | null;
+  receipts: readonly McpHttpAccessReceipt[];
+} {
+  const blockers: string[] = [];
+  let header: McpHttpAccessHeader | null = null;
+  let receipts: McpHttpAccessReceipt[] = [];
+  try {
+    const text = readFileSync(join(directory, "header.json"), "utf8");
+    const parsed = JSON.parse(text) as unknown;
+    if (!isRecord(parsed)) blockers.push("mcp_http_access_header_shape_invalid");
+    else {
+      header = parsed as unknown as McpHttpAccessHeader;
+      if (`${canonicalJson(parsed)}\n` !== text) {
+        blockers.push("mcp_http_access_header_file_noncanonical");
+      }
+      blockers.push(...headerBlockers(header));
+    }
+  } catch {
+    blockers.push("mcp_http_access_header_unreadable");
+  }
+  try {
+    const journal = readFileSync(join(directory, "receipts.ndjson"), "utf8");
+    if (journal.length > 0 && !journal.endsWith("\n")) {
+      blockers.push("mcp_http_access_journal_truncated");
+    }
+    receipts = journal
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line, index) => {
+        try {
+          const parsed = JSON.parse(line) as unknown;
+          if (canonicalJson(parsed) !== line) {
+            blockers.push(`mcp_http_access_journal_noncanonical:${index}`);
+          }
+          return parsed as McpHttpAccessReceipt;
+        } catch {
+          blockers.push(`mcp_http_access_journal_json_invalid:${index}`);
+          return null;
+        }
+      })
+      .filter((item): item is McpHttpAccessReceipt => item !== null);
+  } catch {
+    blockers.push("mcp_http_access_journal_unreadable");
+  }
+  if (header !== null) {
+    try {
+      blockers.push(...receiptChainBlockers(header, receipts));
+    } catch {
+      blockers.push("mcp_http_access_receipt_chain_unreadable");
+    }
+  }
+  return {
+    blockers: Object.freeze([...new Set(blockers)].sort()),
+    header,
+    receipts: Object.freeze(receipts),
+  };
+}
+
 function exactKeys(value: Record<string, unknown>, expected: readonly string[], label: string, blockers: string[]): void {
   const actual = Object.keys(value).sort();
   const wanted = [...expected].sort();
@@ -672,6 +841,26 @@ function writeDurableCanonical(path: string, value: unknown): void {
   writeDurableNewFile(temporary, `${canonicalJson(value)}\n`);
   renameSync(temporary, path);
   fsyncDirectory(dirname(path));
+}
+
+function writeDurableCanonicalExclusive(path: string, value: unknown, existsError: string): void {
+  const temporary = `${path}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
+  writeDurableNewFile(temporary, `${canonicalJson(value)}\n`);
+  try {
+    linkSync(temporary, path);
+    fsyncDirectory(dirname(path));
+  } catch (error) {
+    if (
+      error instanceof Error
+      && "code" in error
+      && (error as NodeJS.ErrnoException).code === "EEXIST"
+    ) {
+      throw new Error(existsError);
+    }
+    throw error;
+  } finally {
+    if (existsSync(temporary)) unlinkSync(temporary);
+  }
 }
 
 function writeDurableNewFile(path: string, text: string): void {

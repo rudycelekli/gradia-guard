@@ -4,6 +4,21 @@ All notable public changes to Gradia Guard are recorded here.
 
 ## Unreleased
 
+## 0.1.0-beta.4 — 2026-09-02
+
+- Added fail-closed recovery for an interrupted MCP HTTP access v2 journal. The
+  recorder independently replays the canonical durable prefix, forbids resumed
+  writes, and atomically finalizes it as `recovered_interruption` without
+  claiming an operating-system crash or reconstructing unappended requests.
+- Added account-free `mcp-http verify` and `mcp-http recover` CLI commands,
+  exclusive no-overwrite finalization, recovery/timestamp mutation checks, and
+  backward verification for finalized beta.3 v1 bundles. Open v1 prefixes are
+  deliberately not recoverable because their signed header says recovery was
+  unsupported.
+
+No full-host, cluster, stdio, socket-parser, pre-append, npm-registry, external-
+adoption or interruption-cause claim is made by this entry.
+
 ## 0.1.0-beta.3 — 2026-09-02
 
 - Added a durable, payload-digest-only HTTP access chain for the exact-route
