@@ -342,6 +342,7 @@ digests.
 import {
   sealMcpHttpProxyConfiguration,
   startAuthenticatedMcpHttpProxy,
+  verifyMcpHttpAccessBundleDirectory,
 } from "@gradia/guard";
 
 const mcpConfiguration = sealMcpHttpProxyConfiguration(exactMcpConfigurationBody);
@@ -359,15 +360,43 @@ const proxy = await startAuthenticatedMcpHttpProxy({
 const childEnvironment = proxy.childEnvironment("case-tools");
 // Configure a modern MCP client with this endpoint, authorization header,
 // and exact protocol version.
+
+const closed = await proxy.close();
+const access = verifyMcpHttpAccessBundleDirectory(
+  closed.http_access_bundle_directory,
+);
+if (!access.ok) throw new Error(access.blockers.join(","));
 ```
+
+Every request that reaches the Node HTTP request listener is appended and
+`fsync`ed before its response. The access receipt binds the exact sealed
+configuration, policy, and startup-verified workload identity; request method,
+target, header shape, body digest and byte lengths; authorization and Origin
+*presence* (never values); a closed reason code; HTTP status; route-target
+digest; upstream-invocation state; and the SDK occurrence digest when one
+exists. Finalization seals the ordered receipt chain and derived counters, and
+`verifyMcpHttpAccessBundleDirectory` independently compares the canonical
+header, append journal, final bundle, hashes, order, timestamps and counts.
+Origin/authentication, HTTP method/content type, target, body/envelope,
+protocol/header, unsupported RPC method, unlisted tool, policy, adapter and
+successful metadata/tool outcomes are distinct.
+
+If every request is refused before a tool decision, `close()` returns
+`sdk_bundle_directory: null` and no empty SDK evidence bundle is fabricated;
+the HTTP access bundle remains complete for the observed listener boundary.
+The access recorder does not claim crash recovery. Socket-parser failures,
+requests outside this proxy and a process crash before a receipt is durable are
+explicitly unobserved; a normally finalized bundle cannot prove those events
+did not occur.
 
 This first proxy edition deliberately supports only MCP `2026-07-28`; it is not
 a compatibility claim for handshake-era clients, streaming subscriptions,
 multi-round-trip input, browser clients, or every MCP extension. Unlisted tool
 names, malformed/header-confused traffic, and unauthorized HTTP requests are
 refused before the invoker. Only policy-bound tool attempts become G2 receipts;
-the proxy's operational HTTP refusal counters are not independently signed
-evidence. Setting the endpoint in a client is automatic routing, not
+pre-tool HTTP requests instead enter the separate verified access chain rather
+than being relabeled as G2 tool decisions. Setting the endpoint in a client is
+automatic routing, not
 non-bypassability: direct network or stdio MCP paths remain possible until a
 separately proved runtime blocks them.
 
