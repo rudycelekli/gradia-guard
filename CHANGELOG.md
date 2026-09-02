@@ -4,6 +4,8 @@ All notable public changes to Gradia Guard are recorded here.
 
 ## Unreleased
 
+## 0.1.0-beta.3 — 2026-09-02
+
 - Added a durable, payload-digest-only HTTP access chain for the exact-route
   MCP proxy. Every request that reaches the Node request listener now records
   its authorization/origin presence, request shape, typed disposition, reason,
@@ -12,6 +14,8 @@ All notable public changes to Gradia Guard are recorded here.
   canonical fsync journal, including mutation, reordering, count-drift and
   truncation refusals. Sessions with only pre-tool refusals finalize without
   fabricating an empty G2 SDK bundle.
+
+No npm-registry publication or external adoption is claimed by this entry.
 
 ## 0.1.0-beta.2 — 2026-08-31
 
