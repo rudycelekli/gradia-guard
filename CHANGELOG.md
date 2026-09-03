@@ -4,6 +4,26 @@ All notable public changes to Gradia Guard are recorded here.
 
 ## Unreleased
 
+## 0.1.0-beta.5 — 2026-09-03
+
+- Added the strict `proof-bound-ag-ui.v1` TypeScript verifier, fragmented SSE
+  parser, canonical proposal builder, action-receipt verifier, shared
+  Python/TypeScript golden vector, and a server-side CopilotKit example.
+- Kept CopilotKit/AG-UI at the interaction edge: only exact human-authorized
+  `steer` and `cancel` proposals have canonical executors; tool dispatch,
+  generic approval and authoritative state write remain refused.
+- Added an authenticated, deny-by-default MCP stdio child proxy for the exact
+  stateless newline-delimited JSON-RPC `tools/call` subset. Authorization is
+  durably appended before child stdin can be written; terminal receipts bind
+  the SDK occurrence and synchronous write-call fact without retaining payloads.
+- Added account-free `mcp-stdio verify` and `mcp-stdio recover` commands,
+  partial-write hardening, interruption-only recovery, and mutation, reorder,
+  count-drift, truncation, identity/configuration, and bypass-boundary tests.
+
+No executable-byte or child-identity attestation, handshake/discovery/streaming
+compatibility, host/container non-bypassability, npm-registry publication,
+external MCP interoperability, or customer deployment is claimed by this entry.
+
 ## 0.1.0-beta.4 — 2026-09-02
 
 - Added fail-closed recovery for an interrupted MCP HTTP access v2 journal. The

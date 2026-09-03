@@ -1,0 +1,78 @@
+{
+  "schema_version": "proof-bound-ag-ui-cross-language-reference.v1",
+  "proposal": {
+    "type": "CUSTOM",
+    "name": "gradia.proposal.v1",
+    "value": {
+      "schemaVersion": "proof-bound-ag-ui.v1",
+      "proposalId": "proposal-golden-1",
+      "kind": "steer",
+      "threadId": "gradia:run-golden-1",
+      "runId": "run-golden-1",
+      "projection": "agent",
+      "payload": {
+        "episodeId": "episode-golden-1",
+        "eventId": "priority.changed"
+      },
+      "contentSha256": "a095fea0b0968f1307aaa5a21fa28cc2ac2122a5ff14518282281e63257c117c",
+      "requestedActionSha256": "f92e712137d0c50bf658b4f79ccf560daa96883fd31037caa625c15b4bd7f137"
+    }
+  },
+  "proposal_sha256": "4c99f1ec722505288e7865fa24d38753f08c2fb805f860c8e8aaddd055e71159",
+  "event_id": "run-golden-1:episode-golden-1:0:0",
+  "event": {
+    "type": "STATE_SNAPSHOT",
+    "metadata": {
+      "gradia": {
+        "authoritativeProjection": true,
+        "episodeId": "episode-golden-1",
+        "logicalAct": 0,
+        "projection": "agent",
+        "rawChainOfThoughtIncluded": false,
+        "runId": "run-golden-1",
+        "schemaVersion": "proof-bound-ag-ui.v1",
+        "sideEffectFreeReplay": true,
+        "source": "verified_observatory",
+        "sourceFrameSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "sourceProjectionSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "sourceSequence": 0,
+        "taskId": "task-golden-1",
+        "upstreamCommit": "3f38925d0e6c19bf1f19502ee12e410e772ac142",
+        "upstreamVersion": "0.1.22",
+        "wireOrdinal": 0
+      }
+    },
+    "snapshot": {
+      "episodeId": "episode-golden-1",
+      "kind": "episode_started",
+      "sequence": 0,
+      "taskId": "task-golden-1",
+      "visibility": "visible"
+    }
+  },
+  "event_sha256": "0abb60d2a7400eb6779dc15f6b7e8e3636e9c80ec09e36e74380d280b23d4963",
+  "sse_sha256": "4bfc77ba196bca43554a04d5b7b16f2b8006cb20e408cda7c85a81162d82e3e4",
+  "action_receipt": {
+    "schemaVersion": "proof-bound-ag-ui.v1",
+    "receiptId": "receipt-golden-1",
+    "orgId": "org-golden-1",
+    "projectId": "project-golden-1",
+    "runId": "run-golden-1",
+    "proposalId": "proposal-golden-1",
+    "proposalSha256": "4c99f1ec722505288e7865fa24d38753f08c2fb805f860c8e8aaddd055e71159",
+    "requestedActionSha256": "f92e712137d0c50bf658b4f79ccf560daa96883fd31037caa625c15b4bd7f137",
+    "kind": "steer",
+    "decision": "approved",
+    "rationale": "Release the predeclared interruption.",
+    "decidedBy": "user-golden-1",
+    "decidedAt": "2026-08-31T12:00:00Z",
+    "canonicalActionPersisted": true,
+    "externalEffectProved": false,
+    "effectStatus": "steering_signal_pending",
+    "effectReferenceType": "scenario_operator_signal",
+    "effectReferenceId": "signal-golden-1",
+    "effectSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "claimBoundary": "human_decision_and_local_canonical_action_persistence_not_external_effect_delivery_or_business_outcome",
+    "receiptSha256": "5bfb7d2c3893a6e2c23e0631da8a5ea3315f496c3aa9bfa4255ce72a9a750b06"
+  }
+}

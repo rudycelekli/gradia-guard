@@ -8,7 +8,34 @@
 > truth. A wrapper or voluntary SDK remains bypassable unless a separately
 > measured enforcing runtime proves a stronger boundary.
 
-Gradia Guard is a zero-runtime-dependency evidence recorder and verifier for AI-system execution.
+Gradia Guard is a proof-bound evidence recorder and verifier for AI-system
+execution. Its optional AG-UI edge uses one exact runtime dependency,
+`@ag-ui/core==0.0.59`, so projected events are checked against the upstream
+wire schema as well as Guard's stricter authority and evidence rules.
+
+## Proof-bound CopilotKit / AG-UI edge
+
+CopilotKit can provide the operator experience—live progress, rendered tool
+activity, and human steering—without becoming the source of tool authority.
+The Guard client verifies fragmented SSE before yielding an event, creates
+canonical proposals, and verifies the action receipt returned by Gradia:
+
+```ts
+import {
+  createProofBoundAguiProposal,
+  parseProofBoundAguiSseStream,
+  verifyProofBoundAguiActionReceipt,
+} from "@gradia/guard";
+```
+
+The complete server-side example is
+[`examples/copilotkit-proof-bound-ag-ui.mjs`](examples/copilotkit-proof-bound-ag-ui.mjs).
+Only exact `steer` and `cancel` proposals currently cross the human-authorized
+canonical action bridge. Browser tools, generic approvals, tool dispatch and
+state patches remain non-authoritative. Frozen Universe tool contracts,
+authenticated connectors, Guard pre-dispatch policy and canonical runtime
+receipts—not CopilotKit registration—establish that a tool is correct and that
+an observed effect occurred.
 
 Python applications can use the source-complete beta in
 `packages/guard-python`. It emits this package's exact
@@ -32,7 +59,7 @@ npx @gradia/guard compare .gradia/evidence/before .gradia/evidence/after
 ```
 
 Before the npm beta is published, the exact tagged public source release can be
-installed with `npm install github:rudycelekli/gradia-guard#v0.1.0-beta.4`.
+installed with `npm install github:rudycelekli/gradia-guard#v0.1.0-beta.5`.
 Registry publication is a separate signed release event and is never inferred
 from this README.
 
@@ -76,7 +103,7 @@ same verifier source:
 
 ```yaml
 - uses: actions/checkout@v6
-- uses: rudycelekli/gradia-guard@v0.1.0-beta.4
+- uses: rudycelekli/gradia-guard@v0.1.0-beta.5
   id: proof
   with:
     proof-pack: path/to/proof-pack
@@ -430,6 +457,63 @@ than being relabeled as G2 tool decisions. Setting the endpoint in a client is
 automatic routing, not
 non-bypassability: direct network or stdio MCP paths remain possible until a
 separately proved runtime blocks them.
+
+### Authenticated MCP stdio child proxy
+
+`startAuthenticatedMcpStdioProxy` starts one declared absolute child executable
+with an empty environment and exposes a serialized, stateless,
+newline-delimited JSON-RPC `tools/call` boundary. The sealed configuration,
+deny-by-default policy, and short-lived signed workload identity must all agree
+before the child is spawned. Every allowed or blocked authorization is appended
+and `fsync`ed before Guard can call the child's stdin writer; terminal receipts
+then bind the exact SDK occurrence and whether that write call occurred. Raw
+arguments and results are not retained by the stdio access journal.
+
+```ts
+import {
+  sealMcpStdioProxyConfiguration,
+  startAuthenticatedMcpStdioProxy,
+  verifyMcpStdioAccessBundleDirectory,
+} from "@gradia/guard";
+
+const configuration = sealMcpStdioProxyConfiguration(exactStdioConfigurationBody);
+const proxy = await startAuthenticatedMcpStdioProxy({
+  directory: ".gradia/evidence/mcp-stdio-1",
+  policy: exactSealedPolicy,
+  configuration,
+  workloadIdentity: shortLivedIdentity,
+  trustedPublicKeys,
+  workloadExpectation: exactDeploymentExpectation,
+  maxIdentityLifetimeSeconds: 600,
+  command: "/absolute/path/to/mcp-server",
+  args: [],
+});
+
+const result = await proxy.invoke(exactRegisteredToolRequest);
+const closed = await proxy.close();
+const access = verifyMcpStdioAccessBundleDirectory(
+  closed.stdio_access_bundle_directory,
+);
+if (!access.ok) throw new Error(access.blockers.join(","));
+```
+
+Interrupted durable prefixes can be closed without inventing a successful or
+failed tool outcome:
+
+```sh
+gradia-guard mcp-stdio recover .gradia/evidence/mcp-stdio-1/mcp-stdio-access
+gradia-guard mcp-stdio verify .gradia/evidence/mcp-stdio-1/mcp-stdio-access
+```
+
+Recovery labels every open transaction `interrupted_unknown`, sets the SDK
+occurrence and child-write fact to `null`, and atomically refuses overwrite.
+The protocol subset deliberately excludes `initialize`, `initialized`,
+discovery, notifications, streaming, and multi-round exchanges. The child
+launch digest binds the declared path, arguments, empty environment, and
+`shell: false`; it does not attest executable bytes or child identity. Direct
+processes, other stdio paths, and parent failure before authorization `fsync`
+remain outside coverage. Consequently this is an enforceable boundary for the
+one spawned child, not a host, container, or Kubernetes non-bypassability claim.
 
 ### Parent-owned provider-credentialless child boundary
 
