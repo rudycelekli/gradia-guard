@@ -2,7 +2,7 @@ import { canonicalJson, digestCanonical, isSha256 } from "./canonical.js";
 
 export const CAPABILITY_CATALOG_SCHEMA_VERSION =
   "gradia.guard.capability-catalog.v2" as const;
-export const GUARD_PACKAGE_VERSION = "0.1.0-beta.5" as const;
+export const GUARD_PACKAGE_VERSION = "0.1.0-beta.6" as const;
 
 export type GuardCapabilityTier = "free_local" | "managed_service";
 

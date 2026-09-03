@@ -1,6 +1,6 @@
 {
   "name": "@gradia/guard",
-  "version": "0.1.0-beta.5",
+  "version": "0.1.0-beta.6",
   "description": "Proof-bound, coverage-explicit evidence receipts for AI system execution.",
   "private": false,
   "type": "module",
@@ -74,12 +74,13 @@
     "@ag-ui/core": "0.0.59"
   },
   "devDependencies": {
-    "@anthropic-ai/sdk": "0.122.0",
     "@ai-sdk/anthropic": "4.0.44",
     "@ai-sdk/google": "4.0.56",
     "@ai-sdk/openai": "4.0.50",
     "@ai-sdk/xai": "4.0.48",
+    "@anthropic-ai/sdk": "0.122.0",
     "@google/genai": "2.19.0",
+    "@modelcontextprotocol/server-everything": "2026.8.31",
     "@types/node": "^22.15.0",
     "ai": "7.0.83",
     "openai": "7.8.0",
