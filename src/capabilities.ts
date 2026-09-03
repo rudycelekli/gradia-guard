@@ -2,7 +2,7 @@ import { canonicalJson, digestCanonical, isSha256 } from "./canonical.js";
 
 export const CAPABILITY_CATALOG_SCHEMA_VERSION =
   "gradia.guard.capability-catalog.v2" as const;
-export const GUARD_PACKAGE_VERSION = "0.1.0-beta.6" as const;
+export const GUARD_PACKAGE_VERSION = "0.1.0-beta.7" as const;
 
 export type GuardCapabilityTier = "free_local" | "managed_service";
 
@@ -157,9 +157,17 @@ export function guardCapabilityCatalog(): GuardCapabilityCatalog {
       ),
       free(
         "free.enforcement_reference_receipts",
-        ["collectDockerContainerEnforcement", "verifyKubernetesEnforcementReceipt"],
-        ["measured container and Kubernetes boundary receipts", "finite bypass and workload-identity evidence"],
-        "reference_receipts_cover_only_the_exact_measured_runtime_and_do_not_remove_operator_bypass",
+        [
+          "collectDockerContainerEnforcement",
+          "verifyContainerMcpStdioProof",
+          "verifyKubernetesEnforcementReceipt",
+        ],
+        [
+          "measured container and Kubernetes boundary receipts",
+          "exact pinned MCP stdio-in-container proof",
+          "finite bypass and workload-identity evidence",
+        ],
+        "reference_receipts_cover_only_the_exact_measured_runtime_and_do_not_remove_operator_or_alternate_process_bypass",
       ),
       free(
         "free.portable_anchor_verify",

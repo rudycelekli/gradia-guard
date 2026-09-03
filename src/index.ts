@@ -1,5 +1,13 @@
 export { canonicalJson, digestCanonical, isSha256, sha256 } from "./canonical.js";
 export {
+  CONTAINER_MCP_STDIO_PROOF_SCHEMA_VERSION,
+  sealContainerMcpStdioProof,
+  verifyContainerMcpStdioProof,
+  type ContainerMcpStdioProof,
+  type ContainerMcpStdioProofBody,
+  type ContainerMcpStdioProofVerification,
+} from "./container-mcp-stdio-proof.js";
+export {
   AG_UI_PYTHON_UPSTREAM_VERSION,
   AG_UI_TYPESCRIPT_UPSTREAM_VERSION,
   AG_UI_UPSTREAM_COMMIT,
