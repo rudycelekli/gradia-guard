@@ -35,6 +35,8 @@ import {
   McpHttpAccessRecorder,
   verifyMcpHttpAccessBundleDirectory,
 } from "./mcp-http-evidence.js";
+import { verifyMcpStdioAccessBundleDirectory } from "./mcp-stdio-evidence.js";
+import { recoverInterruptedMcpStdioAccess } from "./mcp-stdio-proxy.js";
 import {
   composeRuntimeEvidence,
   verifyRuntimeCompositionReceipt,
@@ -95,6 +97,7 @@ async function main(argv: string[]): Promise<number> {
   if (command === "sdk-matrix") return sdkMatrixCommand(rest);
   if (command === "framework-matrix") return frameworkMatrixCommand(rest);
   if (command === "mcp-http") return mcpHttpCommand(rest);
+  if (command === "mcp-stdio") return mcpStdioCommand(rest);
   if (command === "runtime") return await runtimeCommand(rest);
   if (command === "upload") return await uploadCommand(rest);
   process.stderr.write(`unknown command: ${command}\n\n${help()}`);
@@ -128,6 +131,42 @@ function mcpHttpCommand(argv: string[]): number {
   }
   process.stdout.write(`${canonicalJson({
     bundle_path: recorder.bundlePath,
+    chain_head_sha256: bundle.finalization.chain_head_sha256,
+    ok: true,
+    receipt_count: bundle.finalization.receipt_count,
+    recovery_performed: true,
+    session_id: bundle.finalization.session_id,
+    terminal_status: "recovered_interruption",
+  })}\n`);
+  return 0;
+}
+
+function mcpStdioCommand(argv: string[]): number {
+  const [subcommand, directory, ...rest] = argv;
+  if (
+    (subcommand !== "verify" && subcommand !== "recover")
+    || !directory
+    || directory.startsWith("-")
+    || rest.length > 0
+  ) {
+    throw new Error(`mcp_stdio_subcommand_invalid:${subcommand ?? "missing"}`);
+  }
+  const resolved = resolve(directory);
+  if (subcommand === "verify") {
+    const verification = verifyMcpStdioAccessBundleDirectory(resolved);
+    process.stdout.write(`${canonicalJson(verification)}\n`);
+    return verification.ok ? 0 : 1;
+  }
+  const bundle = recoverInterruptedMcpStdioAccess(
+    resolved,
+    () => new Date().toISOString(),
+  );
+  const verification = verifyMcpStdioAccessBundleDirectory(resolved);
+  if (!verification.ok) {
+    throw new Error(`mcp_stdio_recovered_bundle_unverified:${verification.blockers.join(",")}`);
+  }
+  process.stdout.write(`${canonicalJson({
+    bundle_path: resolve(resolved, "bundle.json"),
     chain_head_sha256: bundle.finalization.chain_head_sha256,
     ok: true,
     receipt_count: bundle.finalization.receipt_count,
@@ -1093,7 +1132,7 @@ function proofPackCommand(argv: string[]): number {
 }
 
 function help(): string {
-  return `Gradia Guard 0.1.0-beta.4
+  return `Gradia Guard 0.1.0-beta.5
 
 Usage:
   gradia-guard run [--out DIR] [--spool digest-only|encrypted] [--key-env NAME --key-id ID] -- COMMAND [ARGS...]
@@ -1120,6 +1159,8 @@ Usage:
   gradia-guard framework-matrix [--json]
   gradia-guard mcp-http verify MCP_HTTP_ACCESS_BUNDLE_DIR
   gradia-guard mcp-http recover INTERRUPTED_MCP_HTTP_ACCESS_DIR
+  gradia-guard mcp-stdio verify MCP_STDIO_ACCESS_BUNDLE_DIR
+  gradia-guard mcp-stdio recover INTERRUPTED_MCP_STDIO_ACCESS_DIR
   gradia-guard runtime verify BUNDLE_FILE
   gradia-guard runtime upload --api-base HTTPS_ORIGIN --project ID [--token-env NAME]
     [--retention-policy ID] [--allow-evaluation] [--allow-redistribution]
@@ -1209,6 +1250,12 @@ noncanonical, truncated, legacy or already-finalized prefixes, and writes one
 atomic terminal bundle labeled recovered_interruption. It cannot resume the
 proxy, prove the cause of interruption, or reconstruct requests that were not
 durably appended.
+
+MCP stdio verification is local and account-free. Recovery independently
+replays one unfinalized digest-only authorization journal and finalizes every
+open transaction as interrupted_unknown. It cannot resume the child, prove
+whether child stdin was written before interruption, attest executable bytes or
+child identity, or cover direct processes and other stdio paths.
 
 Runtime collect-docker asks the Docker daemon for the exact agent, gateway, and network
 posture, then launches one blocked-direct-egress probe and one allowed-gateway probe from

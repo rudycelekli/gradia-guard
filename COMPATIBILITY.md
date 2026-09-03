@@ -1,7 +1,29 @@
 # Compatibility policy
 
 `@gradia/guard` is a public beta. The package requires Node.js 20.12 or newer,
-uses native ECMAScript modules, and has zero runtime npm dependencies.
+uses native ECMAScript modules, and pins `@ag-ui/core==0.0.59` as its sole
+runtime npm dependency for the optional strict AG-UI event boundary.
+
+## AG-UI compatibility cell
+
+The only claimed cell is Gradia `proof-bound-ag-ui.v1`, Python
+`ag-ui-protocol==0.1.22`, TypeScript `@ag-ui/core==0.0.59`, and upstream commit
+`3f38925d0e6c19bf1f19502ee12e410e772ac142`. Python and TypeScript must accept
+the same golden proposal, event, SSE and human-action receipt bytes. Unknown
+events or fields, raw reasoning, forged authority/root/credential fields,
+action-digest mutation and receipt overclaim fail closed. This does not claim
+compatibility with arbitrary CopilotKit or AG-UI versions.
+
+## MCP stdio compatibility cell
+
+The only claimed stdio cell is the Guard-owned stateless, serialized,
+newline-delimited JSON-RPC `tools/call` subset identified by
+`MCP_STDIO_PROXY_PROTOCOL_SUBSET`. It does not implement `initialize`,
+`initialized`, discovery, notifications, streaming, multi-round exchanges, or
+arbitrary MCP server/client compatibility. The launch declaration binds an
+absolute executable path, exact arguments, empty environment, and `shell: false`;
+it does not attest the executable bytes or the spawned child's identity.
+Only requests traversing this exact Guard-spawned child boundary are covered.
 
 ## Stable within `0.1.x`
 

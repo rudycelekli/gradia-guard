@@ -54,9 +54,11 @@ try {
   writeFileSync(
     consumer,
     [
-      "import { guardDoctor, guardCapabilityCatalog } from '@gradia/guard';",
+      "import { createProofBoundAguiProposal, guardDoctor, guardCapabilityCatalog, verifyProofBoundAguiProposal } from '@gradia/guard';",
       "const report = guardDoctor();",
       "const catalog = guardCapabilityCatalog();",
+      "const proposal = createProofBoundAguiProposal({ proposalId: 'fresh-install', kind: 'steer', runId: 'run-fresh-install', payload: { episodeId: 'episode-1', eventId: 'event-1' } });",
+      "verifyProofBoundAguiProposal(proposal, 'run-fresh-install');",
       "if (!report.node_supported || catalog.package_boundary.private) process.exit(1);",
       "process.stdout.write('fresh_import_ok\\n');",
       "",
