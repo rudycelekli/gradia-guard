@@ -522,6 +522,29 @@ stdio-access chains, and absence of the raw request marker from the access
 journal. The upstream package is a pinned development-only dependency; this
 single cell does not broaden the protocol or non-bypassability claims above.
 
+The beta.7 source adds one checked local Docker composition for that same exact
+package/version/transport/tool cell. It starts a fresh `node:22-alpine`
+container with network mode `none`, a read-only root filesystem, non-root
+UID/GID `65532`, all capabilities dropped, `no-new-privileges`, no Docker socket
+and no configured provider credential names. The proof binds the container and
+image identities, Node executable bytes, package manifest/tree, dependency
+lock, entrypoint, exact launch declaration, successful `echo` result and both
+payload-free receipt chains. It also forces a 100 ms timeout on
+`trigger-long-running-operation`; Guard records that outcome as `tool_failure`
+with `model_failure_inferred=false`.
+
+From a source checkout, reproduce the exact cell with:
+
+```sh
+npm run test:docker-mcp-stdio -- --out /tmp/guard-mcp-stdio-proof
+```
+
+The checked fixture and exported `verifyContainerMcpStdioProof` verifier can be
+replayed without trusting the prose. The receipt deliberately keeps alternate-
+process/stdio bypass unblocked, Docker-operator bypass possible, and host,
+complete-capture and arbitrary-MCP claims false. One measured container is not
+a production/customer runtime or a general compatibility result.
+
 ### Parent-owned provider-credentialless child boundary
 
 `runProviderCredentiallessChild` composes the process wrapper and authenticated

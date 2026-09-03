@@ -4,6 +4,27 @@ All notable public changes to Gradia Guard are recorded here.
 
 ## Unreleased
 
+## 0.1.0-beta.7 — 2026-09-03
+
+- Added a self-digested `container-mcp-stdio-proof.v1` receipt and fail-closed
+  verifier for one exact pinned MCP stdio server inside one measured local
+  Docker boundary.
+- Added a checked live fixture for
+  `@modelcontextprotocol/server-everything==2026.8.31`: `echo` completes through
+  Guard, while a forced 100 ms timeout on `trigger-long-running-operation` is
+  recorded as `tool_failure` with `model_failure_inferred=false`.
+- Bound the container/image, Node executable, package manifest/tree, dependency
+  lock, entrypoint, child launch declaration and both payload-free Guard chains;
+  added `test:docker-mcp-stdio` to reproduce the cell in a fresh container.
+
+The measured container had no network, no provider credential names, a
+read-only root filesystem, UID/GID `65532`, all Linux capabilities dropped,
+`no-new-privileges`, no Docker socket and an empty child environment. This is
+one local package/version/transport/tool cell. It does not establish alternate-
+process or alternate-stdio-path blocking, Docker-operator or host resistance,
+complete process/file/network/credential/side-effect capture, arbitrary MCP
+compatibility, customer use, or npm publication.
+
 ## 0.1.0-beta.6 — 2026-09-03
 
 - Added an exact live compatibility cell for the official

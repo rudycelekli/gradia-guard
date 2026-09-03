@@ -32,6 +32,23 @@ binds an absolute executable path, exact arguments, empty environment and
 identity. Only requests traversing this exact Guard-spawned child boundary are
 covered.
 
+### Docker-bound MCP stdio compatibility cell
+
+Beta.7 additionally binds that same official package, version, stdio transport
+and `echo` tool to one checked local `node:22-alpine` Docker proof. The measured
+container has network mode `none`, a read-only root filesystem, non-root
+UID/GID `65532`, all Linux capabilities dropped, `no-new-privileges`, no Docker
+socket and no configured provider credential names. The proof binds container
+and image identities, Node executable bytes, package manifest/tree, dependency
+lock, entrypoint, the exact child launch declaration and the independently
+verified SDK and stdio-access chains.
+
+The same cell forces a 100 ms response timeout on
+`trigger-long-running-operation`; that outcome is `tool_failure`, never a model
+failure. This is still only one measured local Docker boundary. An alternate
+process or stdio path, the Docker operator and the host can bypass it, and the
+receipt makes no arbitrary-MCP, complete-capture, production or customer claim.
+
 ## Stable within `0.1.x`
 
 - canonical evidence bundles remain fail-closed and self-digested;
