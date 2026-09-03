@@ -4,6 +4,23 @@ All notable public changes to Gradia Guard are recorded here.
 
 ## Unreleased
 
+## 0.1.0-beta.6 — 2026-09-03
+
+- Added an exact live compatibility cell for the official
+  `@modelcontextprotocol/server-everything==2026.8.31` stdio server. The test
+  launches the installed upstream package with an empty child environment,
+  authorizes its `echo` tool through Guard, verifies the returned content and
+  both receipt chains, and proves the access journal did not retain the raw
+  request marker.
+- Pinned the upstream server only as a development dependency. It is not part
+  of Guard's runtime dependency or published package payload.
+
+This cell proves one tool on one exact upstream server version through Guard's
+already-declared stateless newline-delimited `tools/call` subset. It does not
+claim general MCP compatibility, initialize/discovery/streaming coverage,
+server executable-byte identity, runtime non-bypassability, customer use, or
+npm publication of Guard.
+
 ## 0.1.0-beta.5 — 2026-09-03
 
 - Added the strict `proof-bound-ag-ui.v1` TypeScript verifier, fragmented SSE

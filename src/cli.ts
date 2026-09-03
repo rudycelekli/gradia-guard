@@ -1132,7 +1132,7 @@ function proofPackCommand(argv: string[]): number {
 }
 
 function help(): string {
-  return `Gradia Guard 0.1.0-beta.5
+  return `Gradia Guard 0.1.0-beta.6
 
 Usage:
   gradia-guard run [--out DIR] [--spool digest-only|encrypted] [--key-env NAME --key-id ID] -- COMMAND [ARGS...]

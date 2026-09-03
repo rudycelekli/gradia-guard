@@ -59,7 +59,7 @@ npx @gradia/guard compare .gradia/evidence/before .gradia/evidence/after
 ```
 
 Before the npm beta is published, the exact tagged public source release can be
-installed with `npm install github:rudycelekli/gradia-guard#v0.1.0-beta.5`.
+installed with `npm install github:rudycelekli/gradia-guard#v0.1.0-beta.6`.
 Registry publication is a separate signed release event and is never inferred
 from this README.
 
@@ -103,7 +103,7 @@ same verifier source:
 
 ```yaml
 - uses: actions/checkout@v6
-- uses: rudycelekli/gradia-guard@v0.1.0-beta.5
+- uses: rudycelekli/gradia-guard@v0.1.0-beta.6
   id: proof
   with:
     proof-pack: path/to/proof-pack
@@ -514,6 +514,13 @@ launch digest binds the declared path, arguments, empty environment, and
 processes, other stdio paths, and parent failure before authorization `fsync`
 remain outside coverage. Consequently this is an enforceable boundary for the
 one spawned child, not a host, container, or Kubernetes non-bypassability claim.
+
+The source release gate also runs one exact upstream compatibility cell against
+the actual `@modelcontextprotocol/server-everything==2026.8.31` package over
+stdio and its `echo` tool. That cell verifies the returned content, the SDK and
+stdio-access chains, and absence of the raw request marker from the access
+journal. The upstream package is a pinned development-only dependency; this
+single cell does not broaden the protocol or non-bypassability claims above.
 
 ### Parent-owned provider-credentialless child boundary
 
