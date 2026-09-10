@@ -575,6 +575,9 @@ async function runtimeUploadCommand(argv: string[]): Promise<number> {
     token: tokenFromEnvironment(parsed.tokenEnvironment),
     retentionPolicyId: parsed.retentionPolicyId,
     rights: parsed.rights,
+    ...(parsed.pinnedAnchorPublicKeyEd25519 === undefined ? {} : {
+      pinnedAnchorPublicKeyEd25519: parsed.pinnedAnchorPublicKeyEd25519,
+    }),
   });
   process.stdout.write(`${canonicalJson(result)}\n`);
   return 0;
@@ -986,12 +989,16 @@ async function uploadCommand(argv: string[]): Promise<number> {
     token: tokenFromEnvironment(parsed.tokenEnvironment),
     retentionPolicyId: parsed.retentionPolicyId,
     rights: parsed.rights,
+    ...(parsed.pinnedAnchorPublicKeyEd25519 === undefined ? {} : {
+      pinnedAnchorPublicKeyEd25519: parsed.pinnedAnchorPublicKeyEd25519,
+    }),
   });
   process.stdout.write(`${JSON.stringify(result)}\n`);
   return 0;
 }
 
 interface ParsedUploadOptions {
+  pinnedAnchorPublicKeyEd25519?: string;
   apiBase: string;
   projectId: string;
   artifact: string;
@@ -1006,6 +1013,7 @@ function parseUploadOptions(argv: readonly string[], missingArtifactError: strin
   let artifact: string | undefined;
   let tokenEnvironment = "GRADIA_GUARD_TOKEN";
   let retentionPolicyId = "local-digests-v1";
+  let pinnedAnchorPublicKeyEd25519: string | undefined;
   const rights: GuardRights = {
     evaluation: false,
     redistribution: false,
@@ -1035,6 +1043,12 @@ function parseUploadOptions(argv: readonly string[], missingArtifactError: strin
     } else if (option === "--retention-policy" && value) {
       retentionPolicyId = value;
       index += 1;
+    } else if (option === "--anchor-public-key-ed25519" && value) {
+      if (pinnedAnchorPublicKeyEd25519 !== undefined || !/^[0-9a-f]{64}$/.test(value)) {
+        throw new Error("upload_anchor_public_key_invalid");
+      }
+      pinnedAnchorPublicKeyEd25519 = value;
+      index += 1;
     } else if (option && rightFlags[option]) {
       rights[rightFlags[option]] = true;
     } else if (!option?.startsWith("-") && !artifact) artifact = option;
@@ -1048,6 +1062,7 @@ function parseUploadOptions(argv: readonly string[], missingArtifactError: strin
     projectId,
     artifact,
     tokenEnvironment,
+    ...(pinnedAnchorPublicKeyEd25519 === undefined ? {} : { pinnedAnchorPublicKeyEd25519 }),
     retentionPolicyId,
     rights,
   };
@@ -1132,7 +1147,7 @@ function proofPackCommand(argv: string[]): number {
 }
 
 function help(): string {
-  return `Gradia Guard 0.1.0-beta.7
+  return `Gradia Guard 0.1.0-beta.8
 
 Usage:
   gradia-guard run [--out DIR] [--spool digest-only|encrypted] [--key-env NAME --key-id ID] -- COMMAND [ARGS...]
@@ -1163,7 +1178,7 @@ Usage:
   gradia-guard mcp-stdio recover INTERRUPTED_MCP_STDIO_ACCESS_DIR
   gradia-guard runtime verify BUNDLE_FILE
   gradia-guard runtime upload --api-base HTTPS_ORIGIN --project ID [--token-env NAME]
-    [--retention-policy ID] [--allow-evaluation] [--allow-redistribution]
+    [--retention-policy ID] [--anchor-public-key-ed25519 HEX] [--allow-evaluation] [--allow-redistribution]
     [--allow-derived-publication] [--allow-training] [--allow-raw-trajectory] BUNDLE_FILE
   gradia-guard runtime compose --credentialless DIR --container FILE --bundle G3_FILE
     --created-at ISO_TIMESTAMP --out FILE
@@ -1188,6 +1203,7 @@ Usage:
     --kubernetes-receipt FILE --gateway-evidence DIR --issuer-public-key PEM_FILE
     --broker-ca PEM_FILE
   gradia-guard upload --api-base HTTPS_ORIGIN --project ID [--token-env NAME] [--retention-policy ID]
+    [--anchor-public-key-ed25519 HEX]
     [--allow-evaluation] [--allow-redistribution] [--allow-derived-publication]
     [--allow-training] [--allow-raw-trajectory] BUNDLE_DIR
 

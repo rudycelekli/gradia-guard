@@ -11,7 +11,7 @@ const metadata = JSON.parse(readFileSync(resolve(packageRoot, "package.json"), "
 if (metadata.private !== false) refuse("release_audit_package_private");
 if (metadata.license !== "Apache-2.0") refuse("release_audit_license_mismatch");
 if (metadata.name !== "@gradia/guard") refuse("release_audit_package_name_mismatch");
-if (metadata.version !== "0.1.0-beta.7") refuse("release_audit_version_mismatch");
+if (metadata.version !== "0.1.0-beta.8") refuse("release_audit_version_mismatch");
 if (metadata.publishConfig?.access !== "public" || metadata.publishConfig?.provenance !== true) {
   refuse("release_audit_publish_config_invalid");
 }
@@ -87,6 +87,8 @@ for (const required of [
   "dist/src/ag-ui.js",
   "dist/src/container-mcp-stdio-proof.js",
   "dist/src/index.d.ts",
+  "dist/src/managed-workload-identity.js",
+  "dist/src/mcp-session-evidence.js",
   "dist/src/index.js",
   "examples/copilotkit-proof-bound-ag-ui.mjs",
   "kubernetes/README.md",

@@ -242,3 +242,28 @@ test("managed upload refuses plaintext remote transport and server digest substi
     /upload_bundle_digest_mismatch/,
   );
 });
+
+test("upload verifies an independently pinned anchor and refuses a substituted valid signer", async () => {
+  const bundleSha256 = digestCanonical(fixtureBundle());
+  const rights = { evaluation: true, redistribution: false, derived_publication: false, training: false, raw_trajectory: false };
+  const editionSha256 = digestCanonical({ schema_version: "gradia.guard.evidence-edition.v1", project_id: "project-01",
+    bundle_sha256: bundleSha256, rights, retention_policy_id: "pin-test", created_by: "collector-01" });
+  const makeAnchor = () => signedAnchor({ editionId: "edition-pin", projectId: "project-01", sessionId: fixtureSessionId(),
+    bundleSha256, editionSha256, retentionPolicyId: "pin-test", createdBy: "collector-01" }) as { public_key_ed25519: string };
+  const anchor = makeAnchor();
+  let served = anchor, requests = 0;
+  const options = { apiBase: "https://ingest.example.test", projectId: "project-01", token: "secret", rights,
+    retentionPolicyId: "pin-test", pinnedAnchorPublicKeyEd25519: anchor.public_key_ed25519,
+    fetchImpl: (async (_input, init) => {
+      requests++;
+      return new Response(JSON.stringify({ guard_evidence_edition_id: "edition-pin", bundle_sha256: bundleSha256,
+        edition_sha256: editionSha256, created_by: "collector-01", remote_anchor: served }),
+        { status: 201, headers: { "x-request-id": new Headers(init?.headers).get("x-request-id")! } });
+    }) as typeof fetch };
+  assert.equal((await uploadEvidenceBundle(FIXTURE, options)).anchorTrust, "externally_pinned");
+  served = makeAnchor();
+  await assert.rejects(uploadEvidenceBundle(FIXTURE, options), /anchor/);
+  assert.equal(requests, 2);
+  await assert.rejects(uploadEvidenceBundle(FIXTURE, { ...options, pinnedAnchorPublicKeyEd25519: "invalid" }), /anchor/);
+  assert.equal(requests, 2, "malformed pin must fail before upload");
+});

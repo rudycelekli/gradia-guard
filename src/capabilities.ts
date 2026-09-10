@@ -2,7 +2,7 @@ import { canonicalJson, digestCanonical, isSha256 } from "./canonical.js";
 
 export const CAPABILITY_CATALOG_SCHEMA_VERSION =
   "gradia.guard.capability-catalog.v2" as const;
-export const GUARD_PACKAGE_VERSION = "0.1.0-beta.7" as const;
+export const GUARD_PACKAGE_VERSION = "0.1.0-beta.8" as const;
 
 export type GuardCapabilityTier = "free_local" | "managed_service";
 
@@ -146,8 +146,9 @@ export function guardCapabilityCatalog(): GuardCapabilityCatalog {
           "request response and refusal receipts",
           "durable HTTP and stdio pre-dispatch authorization evidence",
           "atomic interrupted-prefix finalization with HTTP v1 finalized-bundle compatibility",
+          "opt-in pinned 2025-11-25 stdio initialize discovery progress ping and multiple calls",
         ],
-        "mcp_calls_around_the_adapter_or_proxies_and_requests_not_durably_appended_remain_unobserved_and_unenforced;stdio_coverage_is_the_exact_spawned_child_and_stateless_tools_call_subset_only;recovery_does_not_prove_interruption_cause",
+        "mcp_calls_around_the_adapter_or_proxies_and_requests_not_durably_appended_remain_unobserved_and_unenforced;stdio_coverage_is_the_exact_spawned_child_and_selected_v1_or_v2_profile_only;recovery_does_not_prove_interruption_cause",
       ),
       free(
         "free.portable_runtime_receipts",
@@ -172,7 +173,7 @@ export function guardCapabilityCatalog(): GuardCapabilityCatalog {
       free(
         "free.portable_anchor_verify",
         ["CLI: anchor verify-guard", "CLI: anchor verify-universe", "verifyGuardRemoteAnchor", "verifyUniverseAnchor"],
-        ["offline Ed25519 verification of issued managed anchors", "exact expectation binding"],
+        ["offline Ed25519 verification of issued managed anchors", "exact expectation binding", "independently pinned upload anchor verification"],
         "local_verification_does_not_issue_or_revoke_an_anchor",
       ),
     ],

@@ -1,3 +1,4 @@
+import type { ManagedWorkloadIdentityClient } from "./managed-workload-identity.js";
 import type { KeyLike } from "node:crypto";
 import { canonicalJson } from "./canonical.js";
 import {
@@ -25,6 +26,9 @@ import {
 
 export interface AuthenticatedMcpToolAdapterOptions {
   directory: string;
+  managedIdentity?: ManagedWorkloadIdentityClient;
+  /** Fixed-identity transport journals require a new session for renewal. */
+  renewManagedIdentity?: boolean;
   policy: GuardPolicy;
   workloadIdentity: GuardWorkloadIdentity;
   trustedPublicKeys: Readonly<Record<string, KeyLike>>;
@@ -87,6 +91,8 @@ export class AuthenticatedMcpToolAdapter {
   readonly boundary: GuardEnforcementBoundary;
   private readonly policy: GuardPolicy;
   private readonly workloadIdentity: GuardWorkloadIdentity;
+  private readonly managedIdentity: ManagedWorkloadIdentityClient | undefined;
+  private readonly renewManagedIdentity: boolean;
   private readonly trustedPublicKeys: Readonly<Record<string, KeyLike>>;
   private readonly workloadExpectation: Omit<
     WorkloadIdentityExpectation,
@@ -107,6 +113,8 @@ export class AuthenticatedMcpToolAdapter {
     this.workloadIdentity = JSON.parse(
       canonicalJson(options.workloadIdentity),
     ) as GuardWorkloadIdentity;
+    this.managedIdentity = options.managedIdentity;
+    this.renewManagedIdentity = options.renewManagedIdentity ?? true;
     this.trustedPublicKeys = options.trustedPublicKeys;
     this.workloadExpectation = JSON.parse(
       canonicalJson(options.workloadExpectation),
@@ -139,7 +147,7 @@ export class AuthenticatedMcpToolAdapter {
       "guard_mcp_request",
     );
     assertStableId(input.serverId, "guard_mcp_server_id");
-    const authorization = this.authorize(input);
+    const authorization = await this.authorize(input);
     const operation = this.recorder.beginRegisteredToolCall({
       actorId: this.workloadExpectation.workloadId,
       principalId: this.workloadExpectation.projectId,
@@ -280,17 +288,20 @@ export class AuthenticatedMcpToolAdapter {
     this.finalized = true;
   }
 
-  private authorize(input: AuthenticatedMcpToolRequest): {
+  private async authorize(input: AuthenticatedMcpToolRequest): Promise<{
     policy: SdkPolicyDecisionInput;
     identitySha256: string | null;
-  } {
+  }> {
     const reasons: string[] = [
       `enforcement_boundary_sha256:${this.boundary.boundary_sha256}`,
       `mcp_configuration_sha256:${this.workloadExpectation.configurationSha256}`,
     ];
     let identitySha256: string | null = null;
     try {
-      const verified = verifyWorkloadIdentity(this.workloadIdentity, {
+      const identity = this.managedIdentity === undefined || !this.renewManagedIdentity
+        ? this.workloadIdentity : await this.managedIdentity.identity();
+      if (this.managedIdentity !== undefined) await this.managedIdentity.check(identity);
+      const verified = verifyWorkloadIdentity(identity, {
         trustedPublicKeys: this.trustedPublicKeys,
         expectation: {
           ...this.workloadExpectation,

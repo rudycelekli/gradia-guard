@@ -1,3 +1,5 @@
+import type { ManagedWorkloadIdentityClient } from "./managed-workload-identity.js";
+import { MCP_SESSION_VERSION, McpSessionJournal, type McpSessionProfile } from "./mcp-session-evidence.js";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomBytes, type KeyLike } from "node:crypto";
 import { isAbsolute, join } from "node:path";
@@ -37,7 +39,8 @@ export interface GuardMcpStdioToolRoute {
 }
 
 export interface GuardMcpStdioProxyConfigurationBody {
-  schema_version: typeof MCP_STDIO_PROXY_CONFIGURATION_SCHEMA_VERSION;
+  schema_version: typeof MCP_STDIO_PROXY_CONFIGURATION_SCHEMA_VERSION | "gradia.guard.mcp-stdio-proxy-configuration.v2";
+  session?: McpSessionProfile;
   configuration_id: string;
   configuration_version: string;
   default_decision: "blocked";
@@ -55,6 +58,8 @@ export interface AuthenticatedMcpStdioProxyOptions {
   policy: GuardPolicy;
   configuration: GuardMcpStdioProxyConfiguration;
   workloadIdentity: GuardWorkloadIdentity;
+  /** Rechecks the fixed session identity online; renewal requires a new session. */
+  managedIdentity?: ManagedWorkloadIdentityClient;
   trustedPublicKeys: Readonly<Record<string, KeyLike>>;
   workloadExpectation: Omit<WorkloadIdentityExpectation, "requiredAuthorityScopeIds">;
   maxIdentityLifetimeSeconds: number;
@@ -76,7 +81,8 @@ export interface AuthenticatedMcpStdioProxyCloseResult {
   failed_transactions: number;
   child_exit_code: number | null;
   child_signal: NodeJS.Signals | null;
-  protocol_subset: typeof MCP_STDIO_PROXY_PROTOCOL_SUBSET;
+  protocol_subset: typeof MCP_STDIO_PROXY_PROTOCOL_SUBSET | "session_2025_11_25_initialize_discovery_progress_ping_tools_call";
+  session_evidence?: { path: string; receipt_count: number; chain_head_sha256: string };
   claim_boundary:
     "stdio_calls_through_this_spawned_child_only_not_host_or_container_non_bypassability";
 }
@@ -96,13 +102,13 @@ interface InvocationContext {
 }
 
 /**
- * A stateless newline-delimited JSON-RPC `tools/call` enforcement boundary.
+ * A bounded newline-delimited JSON-RPC enforcement boundary.
  *
  * The child receives no request bytes until the authenticated adapter allows
  * the exact tool identity and the authorization receipt has been fsync'd.
- * It does not implement the MCP initialize handshake, discovery, notifications,
- * streaming, or multi-round protocol. It is not a host sandbox: another
- * process can spawn or write around it.
+ * Configuration v2 adds a pinned MCP session, discovery, progress and ping.
+ * Configuration v1 retains the original tools/call-only transport. Neither is
+ * a host sandbox: another process can spawn or write around this boundary.
  */
 export class AuthenticatedMcpStdioProxy {
   readonly configuration: GuardMcpStdioProxyConfiguration;
@@ -123,6 +129,11 @@ export class AuthenticatedMcpStdioProxy {
   private exitCode: number | null = null;
   private exitSignal: NodeJS.Signals | null = null;
   private exited = false;
+  private sessionReady = false;
+  private catalogEpoch = 0;
+  private sessionJournal: McpSessionJournal | null = null;
+  private sessionFailure: Error | null = null;
+  private progressToken: string | null = null;
 
   constructor(input: {
     child: ChildProcessWithoutNullStreams;
@@ -164,6 +175,18 @@ export class AuthenticatedMcpStdioProxy {
     return run;
   }
 
+  /** Advisory cancellation followed by child termination. No acknowledgment or replay is inferred. */
+  interrupt(): { cancellation_requested: boolean; cancellation_acknowledged: false; resumable: false } {
+    const requested = this.sessionReady && this.pending !== null && this.activeContext !== null && !this.exited;
+    if (requested) {
+      try { this.writeNotification({ jsonrpc: "2.0", method: "notifications/cancelled",
+        params: { requestId: this.pending!.id, reason: "Guard owner interrupted this session" } }); }
+      catch { /* Terminate even when the cancellation receipt cannot be appended. */ }
+    }
+    this.failSession(new Error("guard_mcp_session_interrupted_outcome_unknown"));
+    return { cancellation_requested: requested, cancellation_acknowledged: false, resumable: false };
+  }
+
   async close(): Promise<AuthenticatedMcpStdioProxyCloseResult> {
     if (this.closed) throw new Error("guard_mcp_stdio_proxy_already_closed");
     this.closed = true;
@@ -175,18 +198,30 @@ export class AuthenticatedMcpStdioProxy {
     }
     this.adapter?.finalize();
     const bundle = this.accessRecorder.finalize();
-    return closeResult(
+    const result = closeResult(
       bundle,
       this.adapter === null ? null : this.sdkDirectory,
       this.accessDirectory,
       this.exitCode,
       this.exitSignal,
     );
+    if (this.sessionJournal !== null) {
+      result.protocol_subset = "session_2025_11_25_initialize_discovery_progress_ping_tools_call";
+      result.session_evidence = this.sessionJournal.finish();
+    }
+    return result;
   }
 
   private async invokeSerial(
     input: AuthenticatedMcpToolRequest,
   ): Promise<AuthenticatedMcpToolResult> {
+    if (this.sessionFailure !== null) throw this.sessionFailure;
+    if (this.options.configuration.session !== undefined) {
+      if (!this.sessionReady) throw new Error("guard_mcp_session_not_initialized");
+      // Refresh the pinned catalog for each invocation; a notification may arrive
+      // after the preceding response and before the next event-loop turn.
+      try { await this.discover(); } catch (error) { this.failSession(error as Error); throw error; }
+    }
     if (this.exited) throw new Error("guard_mcp_stdio_child_not_running");
     const requestId = `mcp-stdio-request-${this.sequence++}-${randomBytes(8).toString("hex")}`;
     const routeSha256 = digestCanonical({
@@ -233,6 +268,7 @@ export class AuthenticatedMcpStdioProxy {
       directory: this.sdkDirectory,
       policy: this.options.policy,
       workloadIdentity: this.options.workloadIdentity,
+      ...(this.options.managedIdentity === undefined ? {} : { managedIdentity: this.options.managedIdentity, renewManagedIdentity: false }),
       trustedPublicKeys: this.options.trustedPublicKeys,
       workloadExpectation: this.options.workloadExpectation,
       maxIdentityLifetimeSeconds: this.options.maxIdentityLifetimeSeconds,
@@ -260,13 +296,18 @@ export class AuthenticatedMcpStdioProxy {
       jsonrpc: "2.0",
       id: rpcId,
       method: "tools/call",
-      params: { arguments: args, name: input.toolIdentity.tool_id },
+      params: { arguments: args, name: input.toolIdentity.tool_id,
+        ...(this.sessionReady ? { _meta: { progressToken: rpcId } } : {}) },
     });
     if (Buffer.byteLength(envelope, "utf8") > MAX_STDIO_LINE_BYTES) {
       throw new Error("guard_mcp_stdio_envelope_too_large");
     }
-    const response = await this.exchange(rpcId, `${envelope}\n`);
-    return responseFor(input, parseRpcResponse(response, rpcId));
+    this.progressToken = this.sessionReady ? rpcId : null;
+    try {
+      const response = await this.exchange(rpcId, `${envelope}\n`);
+      if (this.sessionFailure !== null) throw this.sessionFailure;
+      return responseFor(input, parseRpcResponse(response, rpcId));
+    } finally { this.progressToken = null; }
   }
 
   private exchange(id: string, line: string): Promise<unknown> {
@@ -280,6 +321,8 @@ export class AuthenticatedMcpStdioProxy {
         if (!this.exited) this.child.kill("SIGKILL");
       }, this.timeoutMs);
       this.pending = { id, resolve, reject, timeout };
+      try { this.sessionJournal?.append("request", JSON.parse(line)); }
+      catch (error) { this.rejectPending(error as Error); return; }
       if (this.activeContext !== null) this.activeContext.childStdinWriteCalled = true;
       this.child.stdin.write(line, "utf8", (error) => {
         if (error) this.rejectPending(new Error("guard_mcp_stdio_write_failed"));
@@ -288,6 +331,7 @@ export class AuthenticatedMcpStdioProxy {
   }
 
   private onStdout(chunk: Buffer): void {
+    if (this.sessionJournal !== null) { this.onSessionStdout(chunk); return; }
     if (this.pending === null) return;
     this.stdoutBuffer = Buffer.concat([this.stdoutBuffer, chunk]);
     if (this.stdoutBuffer.byteLength > MAX_STDIO_LINE_BYTES) {
@@ -315,6 +359,142 @@ export class AuthenticatedMcpStdioProxy {
     this.pending = null;
     clearTimeout(pending.timeout);
     pending.resolve(parsed);
+  }
+
+  async initializeSession(): Promise<void> {
+    const profile = this.options.configuration.session;
+    if (profile === undefined) return;
+    if (this.sessionJournal !== null) throw new Error("guard_mcp_session_already_initialized");
+    this.sessionJournal = new McpSessionJournal(join(this.options.directory, "mcp-session"), {
+      configuration_sha256: this.configuration.configuration_sha256,
+      workload_identity_sha256: this.options.workloadIdentity.identity_sha256,
+      child_launch_sha256: this.childLaunchDeclarationSha256, protocol_version: MCP_SESSION_VERSION,
+    });
+    try {
+      const result = await this.control("initialize", { protocolVersion: MCP_SESSION_VERSION,
+        capabilities: {}, clientInfo: { name: "gradia-guard", version: "0.1.0-beta.8" } });
+      if (!isRecord(result) || result["protocolVersion"] !== MCP_SESSION_VERSION
+        || !isRecord(result["serverInfo"]) || result["serverInfo"]["name"] !== profile.server_name
+        || result["serverInfo"]["version"] !== profile.server_version
+        || !isRecord(result["capabilities"]) || !isRecord(result["capabilities"]["tools"])) {
+        throw new Error("guard_mcp_session_identity_or_version_mismatch");
+      }
+      this.writeNotification({ jsonrpc: "2.0", method: "notifications/initialized" });
+      await this.discover();
+      this.sessionReady = true;
+    } catch (error) {
+      this.sessionFailure = error as Error;
+      this.child.kill("SIGKILL");
+      throw error;
+    }
+  }
+
+  private async control(method: string, params: Record<string, unknown>): Promise<unknown> {
+    await this.options.managedIdentity?.check(this.options.workloadIdentity);
+    verifyWorkloadIdentity(this.options.workloadIdentity, {
+      trustedPublicKeys: this.options.trustedPublicKeys,
+      expectation: { ...this.options.workloadExpectation,
+        requiredAuthorityScopeIds: this.options.workloadIdentity.claims.authority_scope_ids },
+      nowUnix: this.options.nowUnix?.() ?? Math.floor(Date.now() / 1000),
+      maxLifetimeSeconds: this.options.maxIdentityLifetimeSeconds,
+      clockSkewSeconds: this.options.clockSkewSeconds ?? 0,
+    });
+    const id = `mcp-control-${this.sequence++}-${randomBytes(8).toString("hex")}`;
+    const reply = parseRpcResponse(await this.exchange(id, canonicalJson({ jsonrpc: "2.0", id, method, params }) + "\n"), id);
+    if (this.sessionFailure !== null) throw this.sessionFailure;
+    if (reply.isError) throw new Error("guard_mcp_session_control_refused");
+    return reply.result;
+  }
+
+  private async discover(refreshesRemaining = 1): Promise<void> {
+    const epoch = this.catalogEpoch;
+    const tools = new Map<string, Record<string, unknown>>();
+    let cursor: string | undefined;
+    const seen = new Set<string>();
+    for (let page = 0; page < 4; page++) {
+      const result = await this.control("tools/list", cursor === undefined ? {} : { cursor });
+      if (!isRecord(result) || !Array.isArray(result["tools"]) || result["tools"].length > 256) {
+        throw new Error("guard_mcp_session_catalog_invalid");
+      }
+      for (const tool of result["tools"]) {
+        if (!isRecord(tool) || typeof tool["name"] !== "string" || tools.has(tool["name"]) || !isRecord(tool["inputSchema"])) {
+          throw new Error("guard_mcp_session_catalog_invalid");
+        }
+        tools.set(tool["name"], tool);
+      }
+      if (result["nextCursor"] === undefined) { cursor = undefined; break; }
+      if (typeof result["nextCursor"] !== "string" || result["nextCursor"].length > 2048 || seen.has(result["nextCursor"])) {
+        throw new Error("guard_mcp_session_cursor_invalid");
+      }
+      cursor = result["nextCursor"]; seen.add(cursor);
+    }
+    if (cursor !== undefined) throw new Error("guard_mcp_session_catalog_limit");
+    const profile = this.configuration.session as McpSessionProfile;
+    for (const route of this.configuration.tool_routes) {
+      const tool = tools.get(route.tool_name);
+      if (tool === undefined || digestCanonical(tool["inputSchema"]) !== profile.tool_input_schema_sha256[route.tool_name]) {
+        throw new Error("guard_mcp_session_tool_schema_changed");
+      }
+    }
+    // Additional server tools confer no authority and are never exposed by Guard.
+    if (this.catalogEpoch !== epoch) {
+      if (refreshesRemaining === 0) throw new Error("guard_mcp_session_catalog_changed_during_discovery");
+      await this.discover(refreshesRemaining - 1);
+    }
+  }
+
+  private writeNotification(envelope: Record<string, unknown>): void {
+    this.sessionJournal?.append("outgoing_notification", envelope);
+    this.child.stdin.write(canonicalJson(envelope) + "\n", (error) => {
+      if (error) this.failSession(new Error("guard_mcp_session_notification_failed"));
+    });
+  }
+
+  private failSession(error: Error): void {
+    this.sessionFailure = error;
+    this.rejectPending(error);
+    if (!this.exited) this.child.kill("SIGKILL");
+  }
+
+  private onSessionStdout(chunk: Buffer): void {
+    try {
+      this.stdoutBuffer = Buffer.concat([this.stdoutBuffer, chunk]);
+      if (this.stdoutBuffer.length > MAX_STDIO_LINE_BYTES) throw new Error("guard_mcp_session_response_too_large");
+      for (;;) {
+        const end = this.stdoutBuffer.indexOf(0x0a);
+        if (end < 0) break;
+        const line = this.stdoutBuffer.subarray(0, end).toString("utf8");
+        this.stdoutBuffer = this.stdoutBuffer.subarray(end + 1);
+        const message: unknown = JSON.parse(line);
+        if (!isRecord(message) || message["jsonrpc"] !== "2.0") throw new Error("guard_mcp_session_envelope_invalid");
+        this.sessionJournal?.append("incoming", message);
+        if (typeof message["method"] === "string") {
+          if (Object.keys(message).some(key => !["jsonrpc", "method", "id", "params"].includes(key))
+            || (message["params"] !== undefined && !isRecord(message["params"]))) throw new Error("guard_mcp_session_envelope_invalid");
+          if (message["id"] !== undefined) {
+            if (message["method"] !== "ping" || typeof message["id"] !== "string" && typeof message["id"] !== "number") {
+              throw new Error("guard_mcp_session_server_request_not_supported");
+            }
+            this.writeNotification({ jsonrpc: "2.0", id: message["id"], result: {} });
+          } else if (message["method"] === "notifications/tools/list_changed") {
+            this.catalogEpoch++;
+          } else if (message["method"] === "notifications/progress") {
+            const params = message["params"];
+            if (!isRecord(params) || this.progressToken === null || params["progressToken"] !== this.progressToken
+              || typeof params["progress"] !== "number" || !Number.isFinite(params["progress"]) || params["progress"] < 0
+              || (params["total"] !== undefined && (typeof params["total"] !== "number"
+                || !Number.isFinite(params["total"]) || params["total"] < params["progress"]))) {
+              throw new Error("guard_mcp_session_progress_invalid");
+            }
+          } else throw new Error("guard_mcp_session_notification_not_supported");
+          continue;
+        }
+        const pending = this.pending;
+        if (pending === null || message["id"] !== pending.id) throw new Error("guard_mcp_session_response_id_invalid");
+        parseRpcResponse(message, pending.id);
+        this.pending = null; clearTimeout(pending.timeout); pending.resolve(message);
+      }
+    } catch (error) { this.failSession(error as Error); }
   }
 
   private rejectPending(error: Error): void {
@@ -345,6 +525,7 @@ export function verifyMcpStdioProxyConfiguration(
     "schema_version",
     "server_id",
     "tool_routes",
+    ...(configuration.session === undefined ? [] : ["session"]),
   ], "guard_mcp_stdio_configuration");
   const body: GuardMcpStdioProxyConfigurationBody = {
     schema_version: configuration.schema_version,
@@ -353,6 +534,7 @@ export function verifyMcpStdioProxyConfiguration(
     default_decision: configuration.default_decision,
     server_id: configuration.server_id,
     tool_routes: configuration.tool_routes,
+    ...(configuration.session === undefined ? {} : { session: configuration.session }),
   };
   validateConfiguration(body);
   if (!isSha256(configuration.configuration_sha256)
@@ -385,6 +567,7 @@ export async function startAuthenticatedMcpStdioProxy(
     maxLifetimeSeconds: options.maxIdentityLifetimeSeconds,
     clockSkewSeconds: options.clockSkewSeconds ?? 0,
   });
+  await options.managedIdentity?.check(options.workloadIdentity);
   const childLaunchDeclarationSha256 = digestCanonical({
     command: options.command,
     args: [...(options.args ?? [])],
@@ -421,6 +604,8 @@ export async function startAuthenticatedMcpStdioProxy(
     timeoutMs: options.responseTimeoutMs ?? 30_000,
   });
   await spawned;
+  try { await proxy.initializeSession(); }
+  catch (error) { await proxy.close(); throw error; }
   return proxy;
 }
 
@@ -439,8 +624,26 @@ function validateConfiguration(body: GuardMcpStdioProxyConfigurationBody): void 
     "schema_version",
     "server_id",
     "tool_routes",
+    ...(body.session === undefined ? [] : ["session"]),
   ], "guard_mcp_stdio_configuration_body");
-  if (body.schema_version !== MCP_STDIO_PROXY_CONFIGURATION_SCHEMA_VERSION) throw new Error("guard_mcp_stdio_configuration_schema_invalid");
+  if (body.schema_version !== MCP_STDIO_PROXY_CONFIGURATION_SCHEMA_VERSION
+    && body.schema_version !== "gradia.guard.mcp-stdio-proxy-configuration.v2") throw new Error("guard_mcp_stdio_configuration_schema_invalid");
+  if ((body.schema_version === "gradia.guard.mcp-stdio-proxy-configuration.v2") !== (body.session !== undefined)) {
+    throw new Error("guard_mcp_stdio_session_profile_required");
+  }
+  if (body.session !== undefined) {
+    assertExactKeys(body.session as unknown as Record<string, unknown>,
+      ["protocol_version", "server_name", "server_version", "tool_input_schema_sha256"], "guard_mcp_session_profile");
+    if (body.session.protocol_version !== MCP_SESSION_VERSION || !isRecord(body.session.tool_input_schema_sha256)) {
+      throw new Error("guard_mcp_session_profile_invalid");
+    }
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.:/@-]{0,199}$/.test(body.session.server_name)) throw new Error("guard_mcp_server_name_invalid");
+    assertStableId(body.session.server_version, "guard_mcp_server_version");
+    if (Object.keys(body.session.tool_input_schema_sha256).sort().join() !== body.tool_routes.map(r => r.tool_name).sort().join()
+      || Object.values(body.session.tool_input_schema_sha256).some(v => !isSha256(v))) {
+      throw new Error("guard_mcp_session_schema_pins_invalid");
+    }
+  }
   if (body.default_decision !== "blocked") throw new Error("guard_mcp_stdio_configuration_must_default_blocked");
   assertStableId(body.configuration_id, "guard_mcp_stdio_configuration_id");
   assertStableId(body.configuration_version, "guard_mcp_stdio_configuration_version");

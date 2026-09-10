@@ -35,6 +35,8 @@ export interface UploadOptions {
   token: string;
   retentionPolicyId: string;
   rights: GuardRights;
+  /** Obtain this key independently of the upload response. */
+  pinnedAnchorPublicKeyEd25519?: string;
   fetchImpl?: typeof fetch;
 }
 
@@ -46,6 +48,7 @@ export interface UploadResult {
   statusCode: 200 | 201;
   remoteAnchor: GuardRemoteAnchor;
   remoteAnchorVerification: GuardRemoteAnchorVerification;
+  anchorTrust: "externally_pinned" | "https_response_key";
 }
 
 interface StoredBundle {
@@ -86,6 +89,10 @@ async function uploadCanonicalEvidence(
 ): Promise<UploadResult> {
   const bundleSha256 = digestCanonical(bundle);
   const endpoint = ingestionEndpoint(options.apiBase, options.projectId);
+  if (options.pinnedAnchorPublicKeyEd25519 !== undefined
+    && !/^[0-9a-f]{64}$/.test(options.pinnedAnchorPublicKeyEd25519)) {
+    throw new Error("upload_anchor_public_key_invalid");
+  }
   if (!options.token.trim()) throw new Error("upload_token_missing");
   assertStableId(options.retentionPolicyId, "retention_policy_id");
   const uploadIntentSha256 = digestCanonical({
@@ -152,6 +159,9 @@ async function uploadCanonicalEvidence(
     editionSha256,
     retentionPolicyId: options.retentionPolicyId,
     createdBy,
+    ...(options.pinnedAnchorPublicKeyEd25519 === undefined ? {} : {
+      pinnedPublicKeyEd25519: options.pinnedAnchorPublicKeyEd25519,
+    }),
   });
   return {
     guardEvidenceEditionId: editionId,
@@ -161,6 +171,8 @@ async function uploadCanonicalEvidence(
     statusCode: response.status,
     remoteAnchor: remoteAnchorValue as GuardRemoteAnchor,
     remoteAnchorVerification,
+    anchorTrust: options.pinnedAnchorPublicKeyEd25519 === undefined
+      ? "https_response_key" : "externally_pinned",
   };
 }
 
