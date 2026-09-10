@@ -22,6 +22,8 @@ jobs:
           node-version: "24"
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
+      - name: Require exact release tag and package version
+        run: node -e 'if (process.env.GITHUB_REF !== "refs/tags/v" + JSON.parse(require("fs").readFileSync("package.json")).version) process.exit(1)'
       - run: npm ci
       - run: npm run release:verify
       - run: npm publish --tag beta

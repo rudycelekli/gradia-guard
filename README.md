@@ -458,6 +458,67 @@ automatic routing, not
 non-bypassability: direct network or stdio MCP paths remain possible until a
 separately proved runtime blocks them.
 
+
+### Pinned stdio sessions (beta.8)
+
+Seal a `gradia.guard.mcp-stdio-proxy-configuration.v2` configuration with the
+same exact tool routes and a `session` object containing `protocol_version:
+"2025-11-25"`, exact `server_name`, exact `server_version`, and
+`tool_input_schema_sha256` mapping each configured tool name to the canonical
+SHA-256 of its advertised input schema. Pin these from a separately reviewed
+server build. The initialized server must match; negotiation cannot silently
+downgrade the profile or widen authority.
+
+The proxy performs initialize → initialized → bounded paginated tools/list,
+refreshes schema pins before each serialized call, and accepts fragmented
+newline messages, matched progress notifications, tools/list_changed and
+server ping. Discovery is limited to four pages of 256 tools and one refresh
+if a change notification arrives during discovery. Other server requests and
+notifications fail closed. Extra advertised tools never gain authority.
+
+A separate `mcp-session/session.ndjson` hash chain stores message digests,
+counts and linkage, never tool arguments or results. `verifyMcpSessionJournal`
+refuses truncation, mutation and incomplete sessions. There is no transport
+resumption or automatic replay after process loss. `interrupt()` requests
+advisory cancellation and terminates the child; it never asserts cancellation
+acknowledgment or that an already dispatched side effect did not happen. The existing durable tool
+pre-dispatch journal remains the authority for whether a write was admitted.
+The exact official Everything package/version/echo compatibility test runs
+both v1 and v2 profiles; this is not arbitrary MCP or host isolation coverage.
+
+### Managed issuer lifecycle
+
+`ManagedWorkloadIdentityClient` exchanges a fresh workload JWT under an
+administrator-approved project trust edition. Configure the exact API origin,
+organization/project, grant, expected trust-policy hash, independent Ed25519
+public keys and full workload expectation. `sourceToken` is an async callback
+that obtains a fresh issuer JWT; the client never stores it in evidence.
+
+The hosted service uses only the grant's explicitly pinned public JWKs,
+issuer, audience and subject. It performs no issuer discovery or
+JWT-controlled network request. Every new identity consumes the source JTI
+once in a durable database receipt. Renewal requires a new source JTI and
+preserves workload, deployment, scopes and all model/runtime configuration
+hashes. Project-admin policy editions manage signer rotation, disabled grants,
+key revocation and individual identity revocation. Key identifiers cannot be
+rebound or unrevoked, including after removal from an intermediate edition.
+Any trust-edition change invalidates prior-generation online checks.
+
+Pass the client as `managedIdentity` to `AuthenticatedProviderGateway` or
+`AuthenticatedMcpToolAdapter` for bounded renewal plus a fresh signed check
+before every dispatch. For `startAuthenticatedMcpStdioProxy` and
+`startAuthenticatedMcpHttpProxy`, the same option checks the fixed startup
+identity; start a new session with an explicitly renewed identity to preserve
+the transport journal's identity binding. A refused, stale or forged check
+blocks dispatch. An ambiguous exchange is terminal in that client and is
+never automatically retried. Operators may intentionally retry the exact
+request ID/token while it remains current; this does not replay an action.
+
+This is pinned software workload federation and a database trust check, not
+hardware attestation or universal non-bypassability. Offline token verification
+cannot discover revocations. Online revocation is evaluated immediately before
+admission; it cannot undo an already admitted remote side effect.
+
 ### Authenticated MCP stdio child proxy
 
 `startAuthenticatedMcpStdioProxy` starts one declared absolute child executable
@@ -507,8 +568,9 @@ gradia-guard mcp-stdio verify .gradia/evidence/mcp-stdio-1/mcp-stdio-access
 
 Recovery labels every open transaction `interrupted_unknown`, sets the SDK
 occurrence and child-write fact to `null`, and atomically refuses overwrite.
-The protocol subset deliberately excludes `initialize`, `initialized`,
-discovery, notifications, streaming, and multi-round exchanges. The child
+The v1 configuration retains its tools/call-only subset. The opt-in v2
+configuration supports the pinned stdio session described below; HTTP SSE,
+resumption, sampling, elicitation, resources and prompts remain unsupported. The child
 launch digest binds the declared path, arguments, empty environment, and
 `shell: false`; it does not attest executable bytes or child identity. Direct
 processes, other stdio paths, and parent failure before authorization `fsync`
@@ -1256,3 +1318,18 @@ kernel-complete file/process/side-effect capture, proof that an unmeasured
 Kubernetes cluster enforced the manifests, registry distribution, or a public
 compatibility/license promise. Stronger claims remain conditional on the exact
 receipt that proves the corresponding surface.
+
+### Independently pinned upload anchors
+
+Use `--anchor-public-key-ed25519 PINNED_HEX` with `upload` or `runtime upload`,
+or `pinnedAnchorPublicKeyEd25519` in `uploadEvidenceBundle`, to require a public
+key obtained through a separately trusted channel. The signed edition, bundle,
+rights and retention declaration still must match exactly. A substituted valid
+signature under a different key is refused. The result reports `anchorTrust:
+"externally_pinned"`; omitting the optional pin reports `"https_response_key"`
+and establishes response-key consistency only. Verification failure after
+submission does not undo the admitted edition, and Guard does not retry it.
+
+## Python SDK
+
+The Apache-2.0 Python SDK is in [`python/`](python/README.md). Install from source or the checked GitHub release wheel while PyPI publication is pending. It emits the same evidence ABI and can be independently verified by the Node CLI. Default recording stores hashes and sizes; uninstrumented activity remains outside the SDK boundary.

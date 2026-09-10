@@ -622,3 +622,97 @@ test("spawn failure leaves a recoverable zero-transaction access prefix", async 
   const checked = verifyMcpStdioAccessBundleDirectory(accessDirectory);
   assert.equal(checked.ok, true, checked.blockers.join(","));
 });
+
+const sessionSchema = { type: "object", properties: { case_id: { type: "string" } } };
+const sessionChild = String.raw`
+let buffer = "", initialized = false, calls = 0, changed = false;
+const send = value => {
+  const line = JSON.stringify(value) + "\n";
+  process.stdout.write(line.slice(0, 7)); process.stdout.write(line.slice(7));
+};
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", chunk => {
+ buffer += chunk;
+ for (;;) {
+  const end = buffer.indexOf("\n"); if (end < 0) break;
+  const request = JSON.parse(buffer.slice(0, end)); buffer = buffer.slice(end + 1);
+  if (request.method === "initialize") send({jsonrpc:"2.0", id:request.id,
+    result:{protocolVersion:"2025-11-25", serverInfo:{name:"case-server",version:"1.0.0"},capabilities:{tools:{listChanged:true}}}});
+  else if (request.method === "notifications/initialized") initialized = true;
+  else if (request.method === "tools/list") {
+    if (!initialized) process.exit(4);
+    send({jsonrpc:"2.0",id:request.id,result:{tools:[{name:"case.read",inputSchema:
+      changed ? {type:"object"} : {type:"object",properties:{case_id:{type:"string"}}}}]}});
+  } else if (request.method === "tools/call") {
+    if (!initialized) process.exit(5);
+    calls++;
+    send({jsonrpc:"2.0",method:"notifications/progress",params:{progressToken:request.params._meta.progressToken,progress:1,total:1}});
+    send({jsonrpc:"2.0",id:request.id,result:{content:[{type:"text",text:"found"}],calls}});
+    if (request.params.arguments.change) {changed = true;send({jsonrpc:"2.0",method:"notifications/tools/list_changed"});}
+  }
+ }
+});
+`;
+
+async function sessionProxy(script = sessionChild, profileVersion = "1.0.0") {
+  const sourcePolicy = policy();
+  const { configuration_sha256: _hash, ...configBody } = configuration();
+  const sourceConfiguration = sealMcpStdioProxyConfiguration({
+    ...configBody, schema_version: "gradia.guard.mcp-stdio-proxy-configuration.v2",
+    session: { protocol_version: "2025-11-25", server_name: "case-server", server_version: profileVersion,
+      tool_input_schema_sha256: { "case.read": digestCanonical(sessionSchema) } },
+  });
+  const sourceClaims = claims(sourcePolicy, sourceConfiguration);
+  return startAuthenticatedMcpStdioProxy({
+    directory: root(), policy: sourcePolicy, configuration: sourceConfiguration,
+    workloadIdentity: issueWorkloadIdentity(sourceClaims, "issuer-key-v1", keys.privateKey),
+    trustedPublicKeys: { "issuer-key-v1": keys.publicKey },
+    workloadExpectation: { issuerId: sourceClaims.issuer_id, organizationId: sourceClaims.organization_id,
+      projectId: sourceClaims.project_id, workloadId: sourceClaims.workload_id, deploymentId: sourceClaims.deployment_id,
+      audience: sourceClaims.audience, policySha256: sourceClaims.policy_sha256, imageSha256: sourceClaims.image_sha256,
+      configurationSha256: sourceClaims.configuration_sha256, collectorSha256: sourceClaims.collector_sha256 },
+    maxIdentityLifetimeSeconds: 600, nowUnix: () => now + 1, command: process.execPath,
+    args: ["-e", script], responseTimeoutMs: 1000,
+  });
+}
+
+test("pinned MCP session initializes, discovers and handles fragmented progress before multiple calls", async () => {
+  const instance = await sessionProxy();
+  for (let index = 0; index < 2; index++) {
+    const result = await instance.invoke(request({ logicalOperationId: `session-${index}` }));
+    assert.equal(result.disposition, "completed");
+  }
+  const closed = await instance.close();
+  assert.equal(closed.protocol_subset, "session_2025_11_25_initialize_discovery_progress_ping_tools_call");
+  assert.ok((closed.session_evidence?.receipt_count ?? 0) >= 10);
+  const journal = readFileSync(closed.session_evidence!.path, "utf8");
+  assert.equal(journal.includes("private-case"), false);
+  assert.equal(verifySdkBundle(closed.sdk_bundle_directory!).ok, true);
+});
+
+test("MCP session refuses changed server identity and tool discovery drift", async () => {
+  await assert.rejects(sessionProxy(sessionChild, "2.0.0"), /identity_or_version_mismatch/);
+  const instance = await sessionProxy();
+  try {
+    assert.equal((await instance.invoke(request({logicalOperationId:"first",body:{change:true}}))).disposition,"completed");
+    await assert.rejects(instance.invoke(request({logicalOperationId:"second"})), /tool_schema_changed|catalog_changed_during_discovery/);
+  } finally {
+    const closed = await instance.close();
+    assert.equal(closed.transaction_count, 1);
+  }
+});
+
+
+test("MCP owner interruption requests cancellation but never claims acknowledgment or replay", async () => {
+  const script = sessionChild.replace('send({jsonrpc:"2.0",id:request.id,result:{content:[{type:"text",text:"found"}],calls}});', '/* no terminal response */');
+  const instance = await sessionProxy(script);
+  const invocation = instance.invoke(request({ logicalOperationId: "interrupted" }));
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const interrupted = instance.interrupt();
+  assert.deepEqual(interrupted, { cancellation_requested: true, cancellation_acknowledged: false, resumable: false });
+  const result = await invocation;
+  assert.equal(result.disposition, "tool_failure");
+  await assert.rejects(instance.invoke(request({ logicalOperationId: "no-replay" })), /interrupted_outcome_unknown/);
+  const closed = await instance.close();
+  assert.equal(closed.transaction_count, 1);
+});

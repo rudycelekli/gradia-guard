@@ -16,17 +16,19 @@ compatibility with arbitrary CopilotKit or AG-UI versions.
 
 ## MCP stdio compatibility cell
 
-The protocol cell is the Guard-owned stateless, serialized, newline-delimited
+The v1 protocol cell is the Guard-owned stateless, serialized, newline-delimited
 JSON-RPC `tools/call` subset identified by `MCP_STDIO_PROXY_PROTOCOL_SUBSET`.
-One live upstream cell is exercised in every source release gate:
+Beta.8 adds opt-in v2 pinned 2025-11-25 initialize/initialized, paginated discovery,
+progress, tools/list_changed, ping and multiple calls over fragmented stdio.
+The same upstream cell is exercised under both profiles in every source release gate:
 `@modelcontextprotocol/server-everything==2026.8.31`, stdio transport, `echo`
 tool. The test launches the actual installed upstream package, obtains the
 expected result through Guard, verifies both evidence chains and checks that
 the raw request marker is absent from the access journal.
 
 That is one exact package/version/tool cell, not arbitrary MCP compatibility.
-Guard still does not implement `initialize`, `initialized`, discovery,
-notifications, streaming or multi-round exchanges. The launch declaration
+The v2 profile does not support HTTP SSE or resumption, arbitrary server
+requests, sampling, elicitation, resources, prompts or task execution. The launch declaration
 binds an absolute executable path, exact arguments, empty environment and
 `shell: false`; it does not attest executable bytes or the spawned child's
 identity. Only requests traversing this exact Guard-spawned child boundary are

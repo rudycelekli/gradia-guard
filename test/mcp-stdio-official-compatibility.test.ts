@@ -33,7 +33,7 @@ const toolIdentity: SdkToolIdentity = {
   }),
 };
 
-test("Guard dispatches to the pinned official MCP Everything server with verified payload-free receipts", async () => {
+for (const sessionEnabled of [false, true]) test(`Guard dispatches to the pinned official MCP Everything server (session=${sessionEnabled}) with verified payload-free receipts`, async () => {
   const officialServer = join(
     process.cwd(),
     "node_modules",
@@ -61,7 +61,9 @@ test("Guard dispatches to the pinned official MCP Everything server with verifie
     }],
   });
   const configuration = sealMcpStdioProxyConfiguration({
-    schema_version: "gradia.guard.mcp-stdio-proxy-configuration.v1",
+    schema_version: sessionEnabled ? "gradia.guard.mcp-stdio-proxy-configuration.v2" : "gradia.guard.mcp-stdio-proxy-configuration.v1",
+    ...(sessionEnabled ? { session: { protocol_version: "2025-11-25" as const, server_name: "mcp-servers/everything", server_version: "2.0.0",
+      tool_input_schema_sha256: { echo: digestCanonical({ type: "object", properties: { message: { type: "string", description: "Message to echo" } }, required: ["message"], $schema: "http://json-schema.org/draft-07/schema#" }) } } } : {}),
     configuration_id: "official-mcp-everything",
     configuration_version: OFFICIAL_SERVER_PACKAGE_VERSION,
     default_decision: "blocked",
@@ -135,6 +137,7 @@ test("Guard dispatches to the pinned official MCP Everything server with verifie
   assert.deepEqual(body.content, [{ type: "text", text: `Echo: ${marker}` }]);
 
   const closed = await proxy.close();
+  assert.equal(closed.session_evidence !== undefined, sessionEnabled);
   assert.equal(closed.transaction_count, 1);
   assert.equal(closed.completed_transactions, 1);
   assert.equal(closed.failed_transactions, 0);

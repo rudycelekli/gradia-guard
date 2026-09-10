@@ -579,3 +579,9 @@ export {
   SDK_BUNDLE_SCHEMA_VERSION,
   SDK_FRAME_SCHEMA_VERSION,
 } from "./types.js";
+
+export { MCP_SESSION_VERSION, verifyMcpSessionJournal } from "./mcp-session-evidence.js";
+export type { McpSessionProfile } from "./mcp-session-evidence.js";
+
+export { ManagedWorkloadIdentityClient } from "./managed-workload-identity.js";
+export type { ManagedWorkloadIdentityOptions } from "./managed-workload-identity.js";

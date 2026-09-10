@@ -1,3 +1,4 @@
+import type { ManagedWorkloadIdentityClient } from "./managed-workload-identity.js";
 import { createHash, randomBytes, timingSafeEqual, type KeyLike } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
@@ -58,6 +59,8 @@ export interface AuthenticatedMcpHttpProxyOptions {
   policy: GuardPolicy;
   configuration: GuardMcpHttpProxyConfiguration;
   workloadIdentity: GuardWorkloadIdentity;
+  /** Rechecks the fixed session identity online; renewal requires a new session. */
+  managedIdentity?: ManagedWorkloadIdentityClient;
   trustedPublicKeys: Readonly<Record<string, KeyLike>>;
   workloadExpectation: Omit<WorkloadIdentityExpectation, "requiredAuthorityScopeIds">;
   maxIdentityLifetimeSeconds: number;
@@ -251,6 +254,7 @@ export async function startAuthenticatedMcpHttpProxy(
       directory: evidenceDirectory,
       policy: options.policy,
       workloadIdentity: options.workloadIdentity,
+      ...(options.managedIdentity === undefined ? {} : { managedIdentity: options.managedIdentity, renewManagedIdentity: false }),
       trustedPublicKeys: options.trustedPublicKeys,
       workloadExpectation: options.workloadExpectation,
       maxIdentityLifetimeSeconds: options.maxIdentityLifetimeSeconds,

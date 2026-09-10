@@ -1,3 +1,4 @@
+import type { ManagedWorkloadIdentityClient } from "./managed-workload-identity.js";
 import type { KeyLike } from "node:crypto";
 import {
   GatewayIdentityMismatchError,
@@ -21,6 +22,7 @@ import {
 
 export interface AuthenticatedGatewayOptions {
   directory: string;
+  managedIdentity?: ManagedWorkloadIdentityClient;
   policy: GuardPolicy;
   workloadIdentity: GuardWorkloadIdentity;
   trustedPublicKeys: Readonly<Record<string, KeyLike>>;
@@ -67,6 +69,7 @@ export class AuthenticatedProviderGateway {
   readonly recorder: GatewayRecorder;
   private readonly policy: GuardPolicy;
   private readonly workloadIdentity: GuardWorkloadIdentity;
+  private readonly managedIdentity: ManagedWorkloadIdentityClient | undefined;
   private readonly trustedPublicKeys: Readonly<Record<string, KeyLike>>;
   private readonly workloadExpectation: Omit<
     WorkloadIdentityExpectation,
@@ -82,6 +85,7 @@ export class AuthenticatedProviderGateway {
     this.policy = options.policy;
     verifyPolicy(this.policy);
     this.workloadIdentity = options.workloadIdentity;
+    this.managedIdentity = options.managedIdentity;
     this.trustedPublicKeys = options.trustedPublicKeys;
     this.workloadExpectation = options.workloadExpectation;
     this.maxIdentityLifetimeSeconds = options.maxIdentityLifetimeSeconds;
@@ -98,7 +102,7 @@ export class AuthenticatedProviderGateway {
       input.requestBody,
       input.requestedModelFromRoute,
     );
-    const authorization = this.authorize(input, requestedModel);
+    const authorization = await this.authorize(input, requestedModel);
     const prepared = prepareProviderAttempt(this.recorder, {
       provider: input.provider,
       requestBody: input.requestBody,
@@ -168,13 +172,16 @@ export class AuthenticatedProviderGateway {
     this.finalized = true;
   }
 
-  private authorize(
+  private async authorize(
     input: AuthenticatedGatewayRequest,
     requestedModel: string,
-  ): { policy: GatewayPolicyDecisionInput; identitySha256: string | null } {
+  ): Promise<{ policy: GatewayPolicyDecisionInput; identitySha256: string | null }> {
     let identitySha256: string | null = null;
     try {
-      const verified = verifyWorkloadIdentity(this.workloadIdentity, {
+      const identity = this.managedIdentity === undefined
+        ? this.workloadIdentity : await this.managedIdentity.identity();
+      if (this.managedIdentity !== undefined) await this.managedIdentity.check(identity);
+      const verified = verifyWorkloadIdentity(identity, {
         trustedPublicKeys: this.trustedPublicKeys,
         expectation: {
           ...this.workloadExpectation,

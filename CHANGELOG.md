@@ -4,6 +4,26 @@ All notable public changes to Gradia Guard are recorded here.
 
 ## Unreleased
 
+## 0.1.0-beta.8 — 2026-09-10
+
+- Added opt-in pinned 2025-11-25 MCP stdio sessions: initialize, bounded
+  discovery, fragmented messages, progress, list-change refresh and ping;
+  retained the v1 tools/call-only profile and durable pre-dispatch journal.
+- Qualified both profiles against the installed official Everything server
+  2026.8.31 echo tool. Added metadata-only session journal verification that
+  refuses incomplete or mutated sessions and never resumes uncertain actions.
+- Added independently pinned upload-anchor verification and an explicit
+  `anchorTrust` result distinguishing independent pins from response-key trust.
+- Added `ManagedWorkloadIdentityClient`: bounded pinned-key federation,
+  single-flight renewal, nonce-bound signed current-trust checks and refusal
+  before provider/tool dispatch. Hosted trust editions and replay receipts
+  live in Gradia's database; this package never stores source JWTs in evidence.
+- Added exact-tag registry release gates and Python wheel/sdist content checks.
+
+These are supported adapter/session boundaries. They do not prove arbitrary
+process, file, network or side-effect coverage, hardware attestation, registry
+publication, or universal non-bypassability.
+
 ## 0.1.0-beta.7 — 2026-09-03
 
 - Added a self-digested `container-mcp-stdio-proof.v1` receipt and fail-closed
