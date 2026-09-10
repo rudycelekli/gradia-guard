@@ -75,16 +75,16 @@
     "@ag-ui/core": "0.0.59"
   },
   "devDependencies": {
-    "@ai-sdk/anthropic": "4.0.44",
-    "@ai-sdk/google": "4.0.56",
-    "@ai-sdk/openai": "4.0.50",
-    "@ai-sdk/xai": "4.0.48",
-    "@anthropic-ai/sdk": "0.122.0",
-    "@google/genai": "2.19.0",
+    "@ai-sdk/anthropic": "4.0.49",
+    "@ai-sdk/google": "4.0.64",
+    "@ai-sdk/openai": "4.0.60",
+    "@ai-sdk/xai": "4.0.54",
+    "@anthropic-ai/sdk": "0.124.0",
+    "@google/genai": "2.21.0",
     "@modelcontextprotocol/server-everything": "2026.8.31",
-    "@types/node": "^22.15.0",
-    "ai": "7.0.83",
-    "openai": "7.8.0",
-    "typescript": "^5.9.3"
+    "@types/node": "^26.4.1",
+    "ai": "7.0.93",
+    "openai": "7.10.0",
+    "typescript": "^7.0.2"
   }
 }
