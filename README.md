@@ -8,6 +8,14 @@
 > truth. A wrapper or voluntary SDK remains bypassable unless a separately
 > measured enforcing runtime proves a stronger boundary.
 
+| Project metadata | Value |
+| --- | --- |
+| Organization | [Gradia](https://www.gradiahq.com/) |
+| Maintainer | [Rudy Celekli](https://rudycelekli.github.io/#rudy) · Charlotte, North Carolina |
+| Domain | Verifiable agent execution · AI evidence infrastructure |
+| Core capabilities | Proof-bound receipts · offline verification · deterministic replay |
+| Machine-readable record | [`codemeta.json`](codemeta.json) |
+
 Gradia Guard is a proof-bound evidence recorder and verifier for AI-system
 execution. Its optional AG-UI edge uses one exact runtime dependency,
 `@ag-ui/core==0.0.59`, so projected events are checked against the upstream
