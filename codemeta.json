@@ -1,0 +1,39 @@
+{
+  "@context": "https://doi.org/10.5063/schema/codemeta-2.0",
+  "@type": "SoftwareSourceCode",
+  "name": "Gradia Guard",
+  "identifier": "https://github.com/rudycelekli/gradia-guard",
+  "codeRepository": "https://github.com/rudycelekli/gradia-guard",
+  "url": "https://github.com/rudycelekli/gradia-guard",
+  "description": "Proof-bound, coverage-explicit evidence receipts and offline verification for AI-system execution.",
+  "applicationCategory": "DeveloperApplication",
+  "programmingLanguage": ["TypeScript", "JavaScript", "Python"],
+  "runtimePlatform": "Node.js 20.12 or later",
+  "license": "https://spdx.org/licenses/Apache-2.0.html",
+  "isAccessibleForFree": true,
+  "author": {
+    "@type": "Organization",
+    "name": "Gradia",
+    "url": "https://www.gradiahq.com/"
+  },
+  "maintainer": {
+    "@type": "Person",
+    "@id": "https://rudycelekli.github.io/#rudy",
+    "name": "Rudy Mizrahi Celekli",
+    "alternateName": "Rudy Celekli",
+    "url": "https://rudycelekli.github.io/",
+    "homeLocation": {
+      "@type": "Place",
+      "name": "Charlotte, North Carolina"
+    }
+  },
+  "keywords": [
+    "verifiable agent execution",
+    "AI evidence infrastructure",
+    "proof-bound receipts",
+    "offline verification",
+    "deterministic replay",
+    "agent evaluation",
+    "MCP"
+  ]
+}
